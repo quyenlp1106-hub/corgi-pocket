@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Corgi Pocket">
+<title>Corgi Pocket</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/corgi.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#home" data-page="home"><img src="./icons/corgi.svg" alt=""><span>Corgi Pocket<small id="brandSub">Sổ chi tiêu của chị</small></span></a>
+  <span id="connection" class="pill">● Offline</span>
+</header>
+<main id="view"></main>
+
+<button id="fab" class="fab" aria-label="Thêm khoản chi">＋</button>
+<nav class="tabbar" aria-label="Điều hướng">
+  <button data-page="home"><span>▦</span><small>Lịch</small></button>
+  <button data-page="nhi"><span>⇄</span><small id="tabNhi">Nhi</small></button>
+  <button data-page="company"><span>↺</span><small>Hoàn ứng</small></button>
+  <button data-page="fixed"><span>▤</span><small>Cố định</small></button>
+  <button data-page="settings"><span>⚙</span><small>Cài đặt</small></button>
+</nav>
+
+<dialog id="expenseDialog" class="sheet"><form id="expenseForm">
+  <div class="sheet-head"><h2 id="expenseTitle">Thêm khoản chi</h2><button type="button" data-close="expenseDialog" class="icon-btn" aria-label="Đóng">×</button></div>
+  <input name="id" type="hidden">
+  <label class="amount-field">Số tiền
+    <div class="amount-input"><input name="amount" required inputmode="decimal" placeholder="0" autocomplete="off"><button type="button" id="addZeros">000</button></div>
+    <small class="hint">Gõ nhanh: 165k · 1,2tr · 165700</small>
+  </label>
+  <label>Mô tả<input name="description" required maxlength="200" placeholder="Ví dụ: Bún bò, Grab, Siêu thị" list="suggestions" autocomplete="off"></label>
+  <datalist id="suggestions"></datalist>
+  <div id="memoryHint" class="hint red"></div>
+  <div class="field-label">Khoản này của ai?</div>
+  <div class="chips-select" id="splitChips" role="radiogroup"></div>
+  <input type="hidden" name="split" value="half">
+  <label id="customField" hidden><span id="customLabel">Phần của Nhi</span><input name="custom" inputmode="decimal" placeholder="Ví dụ: 58k" autocomplete="off"></label>
+  <div id="payerBlock"><div class="field-label">Ai đã trả?</div><div class="chips-select" id="payerChips" role="radiogroup"></div></div>
+  <input type="hidden" name="payer" value="a">
+  <div class="form-row"><label>Ngày<input name="date" required type="date"></label><label>Danh mục<select name="category"></select></label></div>
+  <label><span>Ghi chú <span class="muted">(không bắt buộc)</span></span><input name="note" maxlength="300" placeholder="Ví dụ: có hoá đơn VAT, mã đơn…" autocomplete="off"></label>
+  <div id="splitPreview" class="split-preview" aria-live="polite"></div>
+  <div class="sheet-foot"><button type="button" data-close="expenseDialog" class="btn ghost">Để sau</button><button class="btn primary" type="submit">Lưu khoản chi</button></div>
+</form></dialog>
+
+<dialog id="fixedDialog" class="sheet"><form id="fixedForm">
+  <div class="sheet-head"><h2 id="fixedTitle">Khoản cố định</h2><button type="button" data-close="fixedDialog" class="icon-btn" aria-label="Đóng">×</button></div>
+  <input type="hidden" name="id"><input type="hidden" name="mode"><input type="hidden" name="type" value="card">
+  <div class="field-label">Loại</div>
+  <div class="chips-select" id="typeChips" role="radiogroup"></div>
+  <label><span id="nameLabel">Tên thẻ</span><input name="name" required maxlength="100" placeholder="Ví dụ: VIB, HSBC, Tiền nhà"></label>
+  <div class="form-row"><label><span id="amountLabel">Số tiền cần trả</span><input name="amount" inputmode="decimal" placeholder="Ví dụ: 2,5tr" autocomplete="off"></label><label><span id="dueText">Hạn thanh toán</span><input name="due" type="date" required></label></div>
+  <label id="principalField" hidden><span>Tổng dư nợ còn lại <span class="muted">(để app tự trừ dần)</span></span><input name="principal" inputmode="decimal" placeholder="Ví dụ: 120tr" autocomplete="off"></label>
+  <label><span>Ghi chú <span class="muted">(không bắt buộc)</span></span><input name="note" maxlength="300" placeholder="Ví dụ: trả tối thiểu, tài khoản nhận…" autocomplete="off"></label>
+  <label class="check" id="repeatField"><input type="checkbox" name="repeat" checked> Lặp lại mỗi tháng (tự tạo khoản tháng sau)</label>
+  <p class="hint" id="fixedHint">Góc riêng, không cộng vào tiền chia với Nhi.</p>
+  <div class="sheet-foot"><button type="button" data-close="fixedDialog" class="btn ghost">Để sau</button><button type="submit" class="btn primary">Lưu lại</button></div>
+</form></dialog>
+
+<dialog id="confirmDialog" class="sheet"><form method="dialog">
+  <div class="sheet-head"><h2 id="confirmTitle"></h2><button class="icon-btn" value="cancel" aria-label="Đóng">×</button></div>
+  <p id="confirmText" class="confirm-text"></p>
+  <div class="sheet-foot"><button class="btn ghost" value="cancel">Quay lại</button><button class="btn primary" value="ok" id="confirmOK">Xác nhận</button></div>
+</form></dialog>
+
+<dialog id="textDialog" class="sheet">
+  <div class="sheet-head"><h2>Nội dung để gửi</h2><button type="button" data-close="textDialog" class="icon-btn" aria-label="Đóng">×</button></div>
+  <textarea id="shareText" rows="14" readonly aria-label="Nội dung"></textarea>
+  <p class="hint">Nhấn giữ để chọn và sao chép.</p>
+</dialog>
+
+<input id="restoreFile" type="file" accept="application/json,.json" hidden>
+<div id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
