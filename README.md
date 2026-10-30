@@ -1,5 +1,7 @@
 # Corgi Pocket 🐶
 
+**Link app:** https://quyenlp1106-hub.github.io/corgi-pocket/ · mã nguồn: https://github.com/quyenlp1106-hub/corgi-pocket
+
 Sổ chi tiêu riêng của chị: biết mỗi ngày tiêu bao nhiêu, Nhi cần trả chị bao nhiêu, công ty còn nợ chị bao nhiêu, tháng này thẻ và nợ cố định còn phải trả bao nhiêu.
 
 ```
@@ -12,6 +14,24 @@ Góc riêng (tab "Cố định", không dính vào tiền chia)
  ├─ 🏦 Nợ cố định   : khai tổng dư nợ một lần → mỗi kỳ tick đã trả, app tự trừ dần và báo còn bao nhiêu kỳ
  └─ 🧾 Chi cố định  : tiền nhà, học phí…
  Tick "Lặp lại mỗi tháng" → đầu tháng sau app tự tạo khoản mới. Trang Lịch báo trước 7 ngày khi sắp tới hạn.
+
+Dòng tiền (tab "Dòng tiền", từ bản 1.1)
+ ├─ Tiền vào   = khoản thu chị ghi (lương, thưởng, vay, thu khác) + Nhi trả chị + công ty hoàn ứng (2 khoản sau app tự tính)
+ ├─ Tiền ra thật = chi trả ngay (tiền mặt, ngân hàng, ví) + kỳ thẻ/nợ/chi cố định đã tick trả + chị trả Nhi
+ └─ Quẹt thẻ / trả sau: tính vào chi tiêu, nhưng chỉ thành tiền ra khi tick đã trả thẻ → không tính trùng
+
+Ví của chị (đầu tab Dòng tiền + 1 dòng ở trang Lịch, từ bản 1.2)
+ ├─ Còn được tiêu tháng này ≈ Tiền đang có − Nợ còn trả tháng này (âm = đỏ: hết tiền mà còn nợ)
+ ├─ Tiền đang có: nhập số dư 1 lần cho tiền mặt / ngân hàng / ví → app tự cộng thu, trừ chi, trừ tiền trả nợ
+ ├─ Thẻ / trả sau: nhập dư nợ + hạn mức → app báo dư nợ và hạn mức còn quẹt được
+ └─ Lệch số thật: bấm vào nguồn → nhập số thực tế, app tự ghi phần chênh
+ Tick "đã trả" ở khoản cố định, chốt với Nhi, nhận hoàn ứng → app hỏi trả bằng / nhận vào nguồn nào.
+
+Nhắc hạn trả (từ bản 1.2)
+ ├─ Trang Lịch: mục "Sắp đến hạn trong tuần" (quá hạn, hôm nay, ngày mai, còn N ngày), tick trả ngay tại chỗ
+ ├─ Cài đặt → Tải lịch nhắc (.ics) → "Thêm tất cả" vào Lịch iPhone: báo 9h sáng hôm trước + sáng ngày đến hạn, không cần mở app
+ └─ Cài đặt → Bật thông báo: mỗi ngày lần đầu mở app, báo các khoản tới hạn trong 3 ngày
+ Mỗi khoản chi chọn "Chi bằng" (nguồn tiền). Thẻ thêm ở Góc cố định tự thành nguồn tiền, và dòng thẻ hiện "Quẹt tháng trước: X" để đối chiếu sao kê.
 ```
 
 ## Cài lên iPhone (làm 1 lần, khoảng 10 phút)

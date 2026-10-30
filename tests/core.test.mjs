@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {moneyInput, shares, debt, totals, outstanding, companyPending, closePeriod, undoPeriod, reimburse, undoReimburse, generateFixed, debtRemaining, dueDate, freshDB, validateDB} from '../docs/core.js';
+import {moneyInput, shares, debt, totals, outstanding, companyPending, closePeriod, undoPeriod, reimburse, undoReimburse, generateFixed, debtRemaining, dueDate, freshDB, validateDB, migrateDB, cashflow, balance, wallet, upcoming, buildICS} from '../docs/core.js';
 
 let n = 0;
 const id = () => 'id' + (++n);
@@ -90,4 +90,81 @@ test('backup hỏng bị chặn', () => {
   assert.throws(() => validateDB({version: 99}));
   const db = {...freshDB(), expenses: [exp({split: 'company', payer: 'b'})]};
   assert.throws(() => validateDB(db));
+});
+
+test('dữ liệu bản cũ tự nâng lên bản mới', () => {
+  const old = {...freshDB(), version: 1}; delete old.sources; delete old.incomes; delete old.incomeCategories;
+  old.expenses = [exp({amount: 200})];
+  const d = migrateDB(old);
+  assert.equal(d.version, 3); assert.ok(d.sources.length >= 4); assert.deepEqual(d.incomes, []); assert.deepEqual(d.adjustments, []);
+});
+
+test('dòng tiền: quẹt thẻ không tính trùng, tiền Nhi trả & công ty hoàn tự vào', () => {
+  let db = freshDB();
+  db.sources.push({id: 'vib', name: 'VIB', kind: 'card'});
+  db.incomes = [{id: 'i1', date: '2026-10-05', amount: 30000000, category: 'Lương', description: 'Lương T10', sourceId: 'bank'},
+                {id: 'i2', date: '2026-11-01', amount: 999, category: 'Lương', description: 'khác tháng', sourceId: 'bank'}];
+  db.expenses = [
+    exp({amount: 200000, sourceId: 'cash'}),                          // chi đôi, chị trả tiền mặt
+    exp({amount: 1000000, sourceId: 'vib'}),                          // quẹt thẻ
+    exp({amount: 500000, split: 'company', sourceId: 'bank'}),        // ứng cho công ty
+    exp({amount: 90000, payer: 'b'}),                                 // Nhi trả, không phải tiền của chị
+  ];
+  db.fixed = [{id: 'f1', type: 'card', name: 'VIB', amount: 4000000, due: '2026-10-05', paid: true, paidDate: '2026-10-05'}];
+  db = closePeriod(db, outstanding(db.expenses).map(e => e.id), 's1', '2026-10-20T05:00:00Z', 'T10'); // Nhi trả chị 100k + 500k (nửa khoản quẹt thẻ) - 45k = 555k
+  db = reimburse(db, companyPending(db.expenses).map(e => e.id), 'r1', '2026-10-25T05:00:00Z');
+  validateDB(db);
+  const c = cashflow(db, '2026-10');
+  assert.equal(c.income, 30000000);
+  assert.equal(c.fromNhi, 555000);
+  assert.equal(c.fromCompany, 500000);
+  assert.equal(c.spend, 1700000);
+  assert.equal(c.credit, 1000000);
+  assert.equal(c.immediate, 700000);
+  assert.equal(c.fixedPaid, 4000000);
+  assert.equal(c.cashIn, 31055000);
+  assert.equal(c.cashOut, 4700000);
+  assert.equal(c.net, 26355000);
+  assert.equal(c.spendBy.vib, 1000000);
+});
+
+test('ví: số dư âm/dương, không trừ trùng khoản ghi trước lúc nhập số dư', () => {
+  const db = migrateDB({...freshDB(), version: 2});
+  const cash = db.sources.find(s => s.id === 'cash'), bank = db.sources.find(s => s.id === 'bank');
+  Object.assign(cash, {opening: 500000, openingDate: '2026-10-30', openingAt: '2026-10-30T05:00:00Z'});
+  Object.assign(bank, {opening: 2000000, openingDate: '2026-10-30', openingAt: '2026-10-30T05:00:00Z'});
+  db.sources.push({id: 'vib', name: 'VIB', kind: 'card', opening: 3000000, openingDate: '2026-10-30', openingAt: '2026-10-30T05:00:00Z', limit: 20000000});
+  db.expenses = [
+    exp({amount: 100000, sourceId: 'cash', date: '2026-10-30', createdAt: '2026-10-30T04:00:00Z'}), // ghi trước lúc nhập số dư → bỏ qua
+    exp({amount: 200000, sourceId: 'cash', date: '2026-10-30', createdAt: '2026-10-30T06:00:00Z'}),
+    exp({amount: 1500000, sourceId: 'vib', date: '2026-10-31', createdAt: '2026-10-31T06:00:00Z'}),
+  ];
+  db.incomes = [{id: 'i1', date: '2026-10-31', amount: 1000000, category: 'Lương', description: 'x', sourceId: 'bank', createdAt: '2026-10-31T01:00:00Z'}];
+  db.fixed = [
+    {id: 'f1', type: 'card', name: 'VIB', amount: 3000000, due: '2026-10-31', paid: true, paidDate: '2026-10-31', paidAt: '2026-10-31T02:00:00Z', paidFrom: 'bank'},
+    {id: 'f2', type: 'debt', name: 'Vay', amount: 4000000, due: '2026-10-28', paid: false, paidDate: null},  // quá hạn
+    {id: 'f3', type: 'bill', name: 'Nhà', amount: 6000000, due: '2026-11-03', paid: false, paidDate: null},
+  ];
+  db.adjustments = [{id: 'a1', sourceId: 'cash', date: '2026-10-31', at: '2026-10-31T09:00:00Z', amount: -50000}];
+  validateDB(db);
+  assert.equal(balance(db, cash), 250000);       // 500k − 200k − 50k chỉnh tay
+  assert.equal(balance(db, bank), 0);            // 2tr + 1tr − 3tr trả thẻ
+  assert.equal(balance(db, db.sources.find(s => s.id === 'vib')), 1500000); // 3tr + 1,5tr quẹt − 3tr đã trả
+  const w = wallet(db, '2026-10-31');
+  assert.equal(w.cash, 250000);
+  assert.equal(w.due, 4000000);                  // chỉ khoản chưa trả tới hết tháng 10
+  assert.equal(w.spendable, -3750000);           // âm: hết tiền mà còn nợ
+  assert.equal(w.creditLeft, 18500000);
+  const u = upcoming(db, '2026-10-31', 7);
+  assert.deepEqual(u.map(f => [f.id, f.daysLeft]), [['f2', -3], ['f3', 3]]);
+});
+
+test('lịch nhắc .ics cho khoản lặp lại và khoản lẻ', () => {
+  const db = freshDB();
+  db.templates = [{id: 't1', type: 'debt', name: 'Vay xe', amount: 3000000, day: 25, start: '2026-10', principal: 9000000}];
+  db.fixed = [{id: 'f9', type: 'bill', name: 'Học phí', amount: 2000000, due: '2026-11-15', paid: false, paidDate: null}];
+  const ics = buildICS(db, '2026-10-30');
+  assert.match(ics, /RRULE:FREQ=MONTHLY;BYMONTHDAY=25;COUNT=3/);
+  assert.match(ics, /DTSTART;VALUE=DATE:20261115/);
+  assert.equal((ics.match(/BEGIN:VALARM/g) || []).length, 4);
 });

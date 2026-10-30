@@ -17,7 +17,7 @@
 <body>
 <header class="topbar">
   <a class="brand" href="#home" data-page="home"><img src="./icons/corgi.svg" alt=""><span>Corgi Pocket<small id="brandSub">Sổ chi tiêu của chị</small></span></a>
-  <span id="connection" class="pill">● Offline</span>
+  <div class="top-actions"><span id="connection" class="pill">● Offline</span><button class="icon-btn" data-page="settings" aria-label="Cài đặt">⚙</button></div>
 </header>
 <main id="view"></main>
 
@@ -27,11 +27,12 @@
   <button data-page="nhi"><span>⇄</span><small id="tabNhi">Nhi</small></button>
   <button data-page="company"><span>↺</span><small>Hoàn ứng</small></button>
   <button data-page="fixed"><span>▤</span><small>Cố định</small></button>
-  <button data-page="settings"><span>⚙</span><small>Cài đặt</small></button>
+  <button data-page="flow"><span>⇅</span><small>Dòng tiền</small></button>
 </nav>
 
 <dialog id="expenseDialog" class="sheet"><form id="expenseForm">
   <div class="sheet-head"><h2 id="expenseTitle">Thêm khoản chi</h2><button type="button" data-close="expenseDialog" class="icon-btn" aria-label="Đóng">×</button></div>
+  <div class="segment mode-switch" id="toIncome"><button type="button" class="on">－ Khoản chi</button><button type="button" data-action="switch-income">＋ Khoản thu</button></div>
   <input name="id" type="hidden">
   <label class="amount-field">Số tiền
     <div class="amount-input"><input name="amount" required inputmode="decimal" placeholder="0" autocomplete="off"><button type="button" id="addZeros">000</button></div>
@@ -46,10 +47,31 @@
   <label id="customField" hidden><span id="customLabel">Phần của Nhi</span><input name="custom" inputmode="decimal" placeholder="Ví dụ: 58k" autocomplete="off"></label>
   <div id="payerBlock"><div class="field-label">Ai đã trả?</div><div class="chips-select" id="payerChips" role="radiogroup"></div></div>
   <input type="hidden" name="payer" value="a">
+  <div id="sourceBlock"><div class="field-label">Chi bằng</div><div class="chips-select" id="sourceChips" role="radiogroup"></div></div>
+  <input type="hidden" name="sourceId" value="">
   <div class="form-row"><label>Ngày<input name="date" required type="date"></label><label>Danh mục<select name="category"></select></label></div>
   <label><span>Ghi chú <span class="muted">(không bắt buộc)</span></span><input name="note" maxlength="300" placeholder="Ví dụ: có hoá đơn VAT, mã đơn…" autocomplete="off"></label>
   <div id="splitPreview" class="split-preview" aria-live="polite"></div>
   <div class="sheet-foot"><button type="button" data-close="expenseDialog" class="btn ghost">Để sau</button><button class="btn primary" type="submit">Lưu khoản chi</button></div>
+</form></dialog>
+
+<dialog id="incomeDialog" class="sheet"><form id="incomeForm">
+  <div class="sheet-head"><h2 id="incomeTitle">Thêm khoản thu</h2><button type="button" data-close="incomeDialog" class="icon-btn" aria-label="Đóng">×</button></div>
+  <div class="segment mode-switch" id="toExpense"><button type="button" data-action="switch-expense">－ Khoản chi</button><button type="button" class="on">＋ Khoản thu</button></div>
+  <input name="id" type="hidden">
+  <label class="amount-field">Số tiền nhận<div class="amount-input"><input name="amount" required inputmode="decimal" placeholder="0" autocomplete="off"></div></label>
+  <div class="field-label">Loại thu</div>
+  <div class="chips-select" id="incomeCatChips" role="radiogroup"></div>
+  <input type="hidden" name="category" value="">
+  <label>Mô tả<input name="description" required maxlength="200" placeholder="Ví dụ: Lương tháng 10, Vay chị Hà" list="incomeSuggestions" autocomplete="off"></label>
+  <datalist id="incomeSuggestions"></datalist>
+  <div class="field-label">Nhận vào</div>
+  <div class="chips-select" id="incomeSourceChips" role="radiogroup"></div>
+  <input type="hidden" name="sourceId" value="">
+  <label>Ngày<input name="date" required type="date"></label>
+  <label><span>Ghi chú <span class="muted">(không bắt buộc)</span></span><input name="note" maxlength="300" placeholder="Ví dụ: hạn trả vay 31/12" autocomplete="off"></label>
+  <p class="hint">Tiền em gái trả chị và tiền công ty hoàn ứng app tự tính, không cần ghi ở đây.</p>
+  <div class="sheet-foot"><button type="button" data-close="incomeDialog" class="btn ghost">Để sau</button><button class="btn primary green-btn" type="submit">Lưu khoản thu</button></div>
 </form></dialog>
 
 <dialog id="fixedDialog" class="sheet"><form id="fixedForm">
@@ -66,9 +88,21 @@
   <div class="sheet-foot"><button type="button" data-close="fixedDialog" class="btn ghost">Để sau</button><button type="submit" class="btn primary">Lưu lại</button></div>
 </form></dialog>
 
+<dialog id="sourceDialog" class="sheet"><form id="sourceSetForm">
+  <div class="sheet-head"><h2 id="sourceTitle">Số dư</h2><button type="button" data-close="sourceDialog" class="icon-btn" aria-label="Đóng">×</button></div>
+  <input type="hidden" name="sid">
+  <p id="sourceNow" class="hint"></p>
+  <label class="amount-field"><span id="sourceAmountLabel">Số dư hiện tại</span><div class="amount-input"><input name="amount" inputmode="decimal" placeholder="0" autocomplete="off"></div></label>
+  <label class="check" id="sourceNegField"><input type="checkbox" name="negative"> Đang âm (thấu chi / nợ)</label>
+  <label id="sourceLimitField"><span>Hạn mức <span class="muted">(để biết còn quẹt được bao nhiêu)</span></span><input name="limit" inputmode="decimal" placeholder="Ví dụ: 50tr" autocomplete="off"></label>
+  <p class="hint" id="sourceHint"></p>
+  <div class="sheet-foot"><button type="button" data-close="sourceDialog" class="btn ghost">Để sau</button><button class="btn primary" type="submit">Lưu</button></div>
+</form></dialog>
+
 <dialog id="confirmDialog" class="sheet"><form method="dialog">
   <div class="sheet-head"><h2 id="confirmTitle"></h2><button class="icon-btn" value="cancel" aria-label="Đóng">×</button></div>
   <p id="confirmText" class="confirm-text"></p>
+  <div id="confirmPick" hidden><div class="field-label" id="confirmPickLabel">Trả bằng</div><div class="chips-select" id="confirmChips" role="radiogroup"></div><input type="hidden" name="pick" value=""></div>
   <div class="sheet-foot"><button class="btn ghost" value="cancel">Quay lại</button><button class="btn primary" value="ok" id="confirmOK">Xác nhận</button></div>
 </form></dialog>
 

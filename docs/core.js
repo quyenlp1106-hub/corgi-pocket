@@ -1,10 +1,13 @@
 // Corgi Pocket — phần tính toán thuần (không đụng giao diện), có test trong tests/core.test.mjs
-export const VERSION = 1;
+export const VERSION = 3;
 export const MAX = 1_000_000_000_000;
 const exactHalf = n => Number.isSafeInteger(n * 2);
 
 export const SPLITS = ['half', 'a', 'b', 'custom', 'company'];
 export const FIXED_TYPES = {card: 'Thẻ tín dụng', debt: 'Nợ cố định', bill: 'Chi cố định'};
+export const SOURCE_KINDS = {cash: 'Tiền mặt', bank: 'Ngân hàng', wallet: 'Ví điện tử', card: 'Thẻ tín dụng', later: 'Trả sau'};
+// Thẻ tín dụng / trả sau: tiêu trước, tiền thật ra khi trả kỳ (tick ở Góc cố định)
+export const isCredit = kind => kind === 'card' || kind === 'later';
 
 export const formatMoney = n => new Intl.NumberFormat('vi-VN', {maximumFractionDigits: 1}).format(n) + ' đ';
 
@@ -119,7 +122,120 @@ export function generateFixed(db, month, makeId) {
 export function freshDB() {
   return {version: VERSION, names: {a: 'Chị', b: 'Nhi', c: 'Công ty', full: ''},
     categories: ['Ăn uống', 'Đi chợ', 'Nhà cửa', 'Di chuyển', 'Mua sắm', 'Corgi', 'Sức khoẻ', 'Khác'],
-    expenses: [], settlements: [], reimbursements: [], templates: [], fixed: [], skips: [], lastBackup: null, updatedAt: null};
+    expenses: [], settlements: [], reimbursements: [], templates: [], fixed: [], skips: [], lastBackup: null, updatedAt: null,
+    sources: defaultSources(), incomes: [], incomeCategories: ['Lương', 'Thưởng', 'Vay', 'Thu nhập khác'], adjustments: [], lastNotified: null};
+}
+function defaultSources() {
+  return [{id: 'cash', name: 'Tiền mặt', kind: 'cash'}, {id: 'bank', name: 'Tài khoản ngân hàng', kind: 'bank'}, {id: 'wallet', name: 'Ví điện tử', kind: 'wallet'}, {id: 'later', name: 'Trả sau', kind: 'later'}];
+}
+
+// Bản 1 → 2: thêm nguồn tiền và khoản thu. Khoản chi cũ để trống nguồn.
+export function migrateDB(d) {
+  if (d && d.version === 1) d = {...d, version: 2, sources: defaultSources(), incomes: [], incomeCategories: freshDB().incomeCategories};
+  if (d && d.version === 2) d = {...d, version: 3, adjustments: [], lastNotified: null};
+  return validateDB(d);
+}
+
+// ---------- Ví: số dư từng nguồn ----------
+// Nguồn tiền mặt/ngân hàng/ví: số dư = số dư đầu ngày openingDate + thu − chi − trả cố định ± tiền với Nhi/công ty + chỉnh tay.
+// Thẻ/trả sau: dư nợ = dư nợ đầu + quẹt − các kỳ thẻ đã trả; còn quẹt được = hạn mức − dư nợ.
+export const isConfigured = s => Number.isSafeInteger(s.opening) && dateValid(s.openingDate) && typeof s.openingAt === 'string';
+export function cardSourceOf(db, f) {
+  return db.sources.find(x => isCredit(x.kind) && ((f.templateId && x.templateId === f.templateId) || x.name.toLowerCase() === f.name.toLowerCase()));
+}
+export function balance(db, s) {
+  if (!isConfigured(s)) return null;
+  // Khoản ghi sau lúc chị nhập số dư mới được cộng/trừ (cùng ngày thì so giờ nhập)
+  const from = (d, at) => d > s.openingDate || (d === s.openingDate && (at || '') > s.openingAt);
+  let n = s.opening;
+  const adj = db.adjustments.filter(a => a.sourceId === s.id && a.at > s.openingAt).reduce((t, a) => t + a.amount, 0);
+  if (isCredit(s.kind)) {
+    for (const e of db.expenses) if (e.kind !== 'opening' && e.payer === 'a' && e.sourceId === s.id && from(e.date, e.createdAt)) n += e.amount;
+    for (const f of db.fixed) if (f.paid && from(f.paidDate, f.paidAt) && f.type === 'card' && cardSourceOf(db, f)?.id === s.id) n -= f.amount;
+    return n + adj;
+  }
+  for (const i of db.incomes) if (i.sourceId === s.id && from(i.date, i.createdAt)) n += i.amount;
+  for (const e of db.expenses) if (e.kind !== 'opening' && e.payer === 'a' && e.sourceId === s.id && from(e.date, e.createdAt)) n -= e.amount;
+  for (const f of db.fixed) if (f.paid && f.paidFrom === s.id && from(f.paidDate, f.paidAt)) n -= f.amount;
+  for (const x of db.settlements) if (x.via === s.id && from(localDate(x.at), x.at)) n += x.net;
+  for (const x of db.reimbursements) if (x.via === s.id && from(localDate(x.at), x.at)) n += x.amount;
+  return n + adj;
+}
+export function wallet(db, todayStr) {
+  const month = todayStr.slice(0, 7), rows = [];
+  let cash = 0, creditDebt = 0, creditLeft = 0, hasLimit = false, missing = 0;
+  for (const s of db.sources) {
+    const b = balance(db, s);
+    if (b === null) { missing++; rows.push({source: s, balance: null}); continue; }
+    if (isCredit(s.kind)) {
+      creditDebt += b;
+      const left = Number.isSafeInteger(s.limit) && s.limit > 0 ? s.limit - b : null;
+      if (left !== null) { creditLeft += left; hasLimit = true; }
+      rows.push({source: s, balance: b, left});
+    } else { cash += b; rows.push({source: s, balance: b}); }
+  }
+  const dueItems = db.fixed.filter(f => !f.paid && f.due.slice(0, 7) <= month);
+  const due = dueItems.reduce((t, f) => t + f.amount, 0);
+  const debtLeft = db.templates.filter(t => t.type === 'debt' && t.principal).reduce((t, x) => t + debtRemaining(db, x), 0);
+  return {rows, cash, due, dueItems, noAmount: dueItems.filter(f => !f.amount).length, spendable: cash - due, creditDebt, creditLeft: hasLimit ? creditLeft : null, debtLeft, missing};
+}
+
+// Khoản chưa trả: quá hạn hoặc tới hạn trong `days` ngày tới
+export function upcoming(db, todayStr, days = 7) {
+  const end = new Date(todayStr + 'T12:00:00'); end.setDate(end.getDate() + days);
+  const endStr = localDate(end.toISOString());
+  return db.fixed.filter(f => !f.paid && f.due <= endStr).sort((a, b) => a.due.localeCompare(b.due))
+    .map(f => ({...f, daysLeft: Math.round((new Date(f.due + 'T12:00:00') - new Date(todayStr + 'T12:00:00')) / 864e5)}));
+}
+
+// File lịch .ics: iPhone tự nhắc (9h sáng hôm trước và 9h sáng ngày đến hạn) kể cả khi không mở app
+export function buildICS(db, todayStr, names = FIXED_TYPES) {
+  const esc = t => String(t).replace(/[\\;,]/g, m => '\\' + m).replace(/\n/g, '\\n');
+  const ymd = d => d.replaceAll('-', '');
+  const next = d => { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + 1); return ymd(localDate(x.toISOString())); };
+  const money = n => new Intl.NumberFormat('vi-VN').format(n) + 'đ';
+  const alarm = ['BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Sắp đến hạn', 'TRIGGER:-PT15H', 'END:VALARM', 'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Hôm nay đến hạn', 'TRIGGER:PT9H', 'END:VALARM'];
+  const ev = [], stamp = ymd(todayStr) + 'T000000Z';
+  const month = todayStr.slice(0, 7);
+  for (const t of db.templates) {
+    const left = t.type === 'debt' ? debtRemaining(db, t) : null;
+    if (left === 0) continue;
+    const startMonth = t.start > month ? t.start : month, first = dueDate(startMonth, Math.min(t.day, 28));
+    const count = left && t.amount ? Math.ceil(left / t.amount) : null;
+    ev.push('BEGIN:VEVENT', `UID:corgi-${t.id}@corgi-pocket`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${ymd(first)}`, `DTEND;VALUE=DATE:${next(first)}`,
+      `RRULE:FREQ=MONTHLY;BYMONTHDAY=${Math.min(t.day, 28)}${count ? ';COUNT=' + count : ''}`,
+      `SUMMARY:${esc(`🐶 Trả ${names[t.type].toLowerCase()}: ${t.name}${t.amount ? ' ' + money(t.amount) : ''}`)}`, ...alarm, 'END:VEVENT');
+  }
+  for (const f of db.fixed) {
+    if (f.paid || f.templateId || f.due < todayStr) continue;
+    ev.push('BEGIN:VEVENT', `UID:corgi-${f.id}@corgi-pocket`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${ymd(f.due)}`, `DTEND;VALUE=DATE:${next(f.due)}`,
+      `SUMMARY:${esc(`🐶 Trả ${f.name}${f.amount ? ' ' + money(f.amount) : ''}`)}`, ...alarm, 'END:VEVENT');
+  }
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Corgi Pocket//VI', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Corgi Pocket', ...ev, 'END:VCALENDAR'].join('\r\n');
+}
+
+const localDate = iso => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+// Dòng tiền của chị trong 1 tháng (YYYY-MM).
+// Chi tiêu = mọi khoản chị trả (kể cả quẹt thẻ). Tiền thật ra = trả ngay + kỳ cố định đã tick trả + chị trả Nhi.
+export function cashflow(db, month) {
+  const src = id => db.sources.find(x => x.id === id);
+  const inMonth = d => d.slice(0, 7) === month;
+  const r = {income: 0, incomeBy: {}, fromNhi: 0, fromCompany: 0, toNhi: 0, spend: 0, spendBy: {}, credit: 0, immediate: 0, fixedPaid: 0, fixedBy: {}, cashIn: 0, cashOut: 0, net: 0};
+  for (const i of db.incomes) if (inMonth(i.date)) { r.income += i.amount; r.incomeBy[i.category] = (r.incomeBy[i.category] || 0) + i.amount; }
+  for (const s of db.settlements) if (inMonth(localDate(s.at))) { if (s.net > 0) r.fromNhi += s.net; else r.toNhi -= s.net; }
+  for (const x of db.reimbursements) if (inMonth(localDate(x.at))) r.fromCompany += x.amount;
+  for (const e of db.expenses) {
+    if (e.kind === 'opening' || e.payer !== 'a' || !inMonth(e.date)) continue;
+    const key = e.sourceId && src(e.sourceId) ? e.sourceId : '';
+    r.spend += e.amount; r.spendBy[key] = (r.spendBy[key] || 0) + e.amount;
+    if (isCredit(src(e.sourceId)?.kind)) r.credit += e.amount; else r.immediate += e.amount;
+  }
+  for (const f of db.fixed) if (f.paid && inMonth(f.paidDate)) { r.fixedPaid += f.amount; r.fixedBy[f.type] = (r.fixedBy[f.type] || 0) + f.amount; }
+  r.cashIn = r.income + r.fromNhi + r.fromCompany;
+  r.cashOut = r.immediate + r.fixedPaid + r.toNhi;
+  r.net = r.cashIn - r.cashOut;
+  return r;
 }
 
 export function dateValid(s) {
@@ -135,7 +251,12 @@ export function validateDB(d) {
   const integer = n => Number.isSafeInteger(n) && n >= 0 && n <= MAX;
   const unique = arr => new Set(arr.map(x => x.id)).size === arr.length;
   if (!d || d.version !== VERSION || !d.names || !str(d.names.a, 30) || !str(d.names.b, 30) || !str(d.names.c, 60) || !opt(d.names.full, 80)) fail();
-  if (!Array.isArray(d.categories) || !d.categories.length || d.categories.some(x => !str(x))) fail();
+  for (const key of ['categories', 'incomeCategories']) if (!Array.isArray(d[key]) || !d[key].length || d[key].some(x => !str(x))) fail();
+  const int = n => n === undefined || n === null || (Number.isSafeInteger(n) && Math.abs(n) <= MAX);
+  if (!Array.isArray(d.sources) || !d.sources.length || !unique(d.sources) || d.sources.some(x => !str(x.id) || !str(x.name, 60) || !SOURCE_KINDS[x.kind] || !int(x.opening) || !(x.openingDate == null || dateValid(x.openingDate)) || !opt(x.openingAt, 40) || !int(x.limit))) fail();
+  if (!Array.isArray(d.adjustments) || !unique(d.adjustments) || d.adjustments.some(a => !str(a.id) || !str(a.sourceId) || !dateValid(a.date) || !str(a.at, 40) || !Number.isSafeInteger(a.amount) || !opt(a.note))) fail();
+  if (!Array.isArray(d.incomes) || !unique(d.incomes)) fail();
+  for (const i of d.incomes) if (!str(i.id) || !str(i.description, 200) || !dateValid(i.date) || !integer(i.amount) || !str(i.category) || !opt(i.note) || !(i.sourceId == null || d.sources.some(x => x.id === i.sourceId))) fail();
   for (const key of ['expenses', 'settlements', 'reimbursements', 'templates', 'fixed', 'skips']) if (!Array.isArray(d[key]) || d[key].length > 100000) fail();
   for (const key of ['expenses', 'settlements', 'reimbursements', 'templates', 'fixed']) if (!unique(d[key])) fail();
   for (const e of d.expenses) {
@@ -145,6 +266,7 @@ export function validateDB(d) {
       if (!integer(e.amount) || !['a', 'b'].includes(e.payer) || !str(e.category)) fail();
       try { shares(e.amount, e.split, e.custom); } catch { fail(); }
       if (e.split === 'company' && (e.payer !== 'a' || e.settlementId)) fail();
+      if (e.sourceId != null && typeof e.sourceId !== 'string') fail();
     }
     if (e.settlementId && !d.settlements.some(s => s.id === e.settlementId && s.entryIds.includes(e.id))) fail();
     if (e.reimburseId && !d.reimbursements.some(r => r.id === e.reimburseId && r.entryIds.includes(e.id))) fail();
@@ -160,7 +282,8 @@ export function validateDB(d) {
     if (rows.length !== r.entryIds.length || rows.some(e => e.reimburseId !== r.id) || rows.reduce((s, e) => s + e.amount, 0) !== r.amount) fail();
   }
   for (const t of d.templates) if (!str(t.id) || !FIXED_TYPES[t.type] || !str(t.name) || !integer(t.amount) || !Number.isInteger(t.day) || t.day < 1 || t.day > 31 || !/^\d{4}-\d{2}$/.test(t.start) || !(t.principal === undefined || t.principal === null || integer(t.principal)) || !opt(t.note)) fail();
-  for (const f of d.fixed) if (!str(f.id) || !FIXED_TYPES[f.type] || !str(f.name) || !integer(f.amount) || !dateValid(f.due) || typeof f.paid !== 'boolean' || (f.paid && !dateValid(f.paidDate)) || !opt(f.note)) fail();
+  for (const f of d.fixed) if (!str(f.id) || !FIXED_TYPES[f.type] || !str(f.name) || !integer(f.amount) || !dateValid(f.due) || typeof f.paid !== 'boolean' || (f.paid && !dateValid(f.paidDate)) || !opt(f.note) || !(f.paidFrom == null || typeof f.paidFrom === 'string')) fail();
+  for (const x of [...d.settlements, ...d.reimbursements]) if (!(x.via == null || typeof x.via === 'string')) fail();
   if (d.skips.some(x => typeof x !== 'string')) fail();
   totals(d.expenses);
   return d;
