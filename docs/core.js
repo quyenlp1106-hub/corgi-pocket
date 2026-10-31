@@ -289,6 +289,24 @@ export function validateDB(d) {
   return d;
 }
 
+// Nhập thêm từ file (ví dụ sao kê ngân hàng): cộng vào dữ liệu đang có, không xoá gì, không nhập trùng
+export function mergeImport(db, pack, makeId, nowIso) {
+  if (!pack || pack.corgiImport !== 1 || !pack.source || !Array.isArray(pack.expenses) || !Array.isArray(pack.incomes)) throw Error('File không phải file nhập của Corgi Pocket.');
+  const next = structuredClone(db);
+  let src = next.sources.find(x => x.name.toLowerCase() === String(pack.source.name).toLowerCase());
+  if (!src) { src = {id: makeId(), name: pack.source.name, kind: pack.source.kind}; next.sources.push(src); }
+  const setOpening = !isConfigured(src) && Number.isSafeInteger(pack.source.closing);
+  if (setOpening) Object.assign(src, {opening: pack.source.closing, openingDate: pack.source.closingDate, openingAt: nowIso});
+  for (const c of pack.categories || []) if (!next.categories.includes(c)) next.categories.push(c);
+  for (const c of pack.incomeCategories || []) if (!next.incomeCategories.includes(c)) next.incomeCategories.push(c);
+  const has = new Set([...next.expenses, ...next.incomes].map(x => x.id));
+  const exp = pack.expenses.filter(e => !has.has(e.id)).map(e => ({...e, sourceId: src.id}));
+  const inc = pack.incomes.filter(i => !has.has(i.id)).map(i => ({...i, sourceId: src.id}));
+  next.expenses.push(...exp); next.incomes.push(...inc);
+  validateDB(next);
+  return {db: next, expenses: exp.length, incomes: inc.length, duplicates: pack.expenses.length + pack.incomes.length - exp.length - inc.length, source: src.name, setOpening};
+}
+
 export function csvCell(v) {
   const s = String(v ?? '');
   return '"' + (/^[\s]*[=+@\-\t\r]/.test(s) ? "'" + s : s).replaceAll('"', '""') + '"';

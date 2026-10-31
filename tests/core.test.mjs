@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {moneyInput, shares, debt, totals, outstanding, companyPending, closePeriod, undoPeriod, reimburse, undoReimburse, generateFixed, debtRemaining, dueDate, freshDB, validateDB, migrateDB, cashflow, balance, wallet, upcoming, buildICS} from '../docs/core.js';
+import {moneyInput, shares, debt, totals, outstanding, companyPending, closePeriod, undoPeriod, reimburse, undoReimburse, generateFixed, debtRemaining, dueDate, freshDB, validateDB, migrateDB, cashflow, balance, wallet, upcoming, buildICS, mergeImport} from '../docs/core.js';
 
 let n = 0;
 const id = () => 'id' + (++n);
@@ -167,4 +167,20 @@ test('lịch nhắc .ics cho khoản lặp lại và khoản lẻ', () => {
   assert.match(ics, /RRULE:FREQ=MONTHLY;BYMONTHDAY=25;COUNT=3/);
   assert.match(ics, /DTSTART;VALUE=DATE:20261115/);
   assert.equal((ics.match(/BEGIN:VALARM/g) || []).length, 4);
+});
+
+test('nhập thêm từ file: giữ dữ liệu cũ, không nhập trùng, số dư lấy theo cuối sao kê', () => {
+  const db = migrateDB({...freshDB(), version: 2});
+  db.expenses = [exp({id: 'old', amount: 50000})];
+  const pack = {corgiImport: 1, source: {name: 'Tiền mặt TCB', kind: 'bank', closing: 5000000, closingDate: '2026-10-31'},
+    categories: ['Chưa phân loại'], incomeCategories: ['Hoàn tiền'],
+    expenses: [exp({id: 'tcb-1', amount: 100000, category: 'Chưa phân loại', review: true, createdAt: '2026-10-30T00:00:00.000Z', date: '2026-10-30'})],
+    incomes: [{id: 'tcb-2', date: '2026-10-30', amount: 300000, category: 'Hoàn tiền', description: 'Hoàn tiền', review: true, createdAt: '2026-10-30T00:00:00.000Z'}]};
+  const r = mergeImport(db, pack, () => 'src-tcb', '2026-10-31T03:00:00.000Z');
+  assert.equal(r.expenses, 1); assert.equal(r.incomes, 1); assert.equal(r.db.expenses.length, 2);
+  const src = r.db.sources.find(s => s.name === 'Tiền mặt TCB');
+  assert.equal(balance(r.db, src), 5000000);          // khoản cũ trong sao kê không bị trừ lại
+  const again = mergeImport(r.db, pack, () => 'x', '2026-10-31T04:00:00.000Z');
+  assert.equal(again.expenses + again.incomes, 0); assert.equal(again.duplicates, 2);
+  assert.throws(() => mergeImport(db, {foo: 1}, () => 'x', 'now'));
 });

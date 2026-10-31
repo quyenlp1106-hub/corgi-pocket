@@ -34,6 +34,11 @@ Nhắc hạn trả (từ bản 1.2)
  Mỗi khoản chi chọn "Chi bằng" (nguồn tiền). Thẻ thêm ở Góc cố định tự thành nguồn tiền, và dòng thẻ hiện "Quẹt tháng trước: X" để đối chiếu sao kê.
 ```
 
+Nhập sao kê ngân hàng (từ bản 1.3)
+ Cài đặt → "＋ Nhập thêm từ file" → chọn file .json em tạo từ sao kê. Chỉ cộng thêm, không xoá dữ liệu đang có, nhập lại không bị trùng.
+ Khoản chưa rõ chi cho ai / mục đích gì có nhãn "🔎 Cần xem lại" → trang Lịch có lối vào danh sách để sửa dần.
+ File .json sao kê để trong iCloud (thư mục 💰 TCB), KHÔNG để trong thư mục này vì thư mục này đưa lên GitHub công khai.
+
 ## Cài lên iPhone (làm 1 lần, khoảng 10 phút)
 
 | Bước | Làm gì |

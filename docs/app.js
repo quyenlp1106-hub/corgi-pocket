@@ -1,4 +1,4 @@
-import {moneyInput, formatMoney, shares, debt, totals, monthOf, outstanding, companyPending, closePeriod, undoPeriod, reimburse, undoReimburse, generateFixed, debtRemaining, dueDate, freshDB, validateDB, migrateDB, cashflow, wallet, balance, upcoming, buildICS, isConfigured, dateValid, csvCell, FIXED_TYPES, SOURCE_KINDS, isCredit} from './core.js';
+import {moneyInput, formatMoney, shares, debt, totals, monthOf, outstanding, companyPending, closePeriod, undoPeriod, reimburse, undoReimburse, generateFixed, debtRemaining, dueDate, freshDB, validateDB, migrateDB, cashflow, wallet, balance, upcoming, buildICS, isConfigured, mergeImport, dateValid, csvCell, FIXED_TYPES, SOURCE_KINDS, isCredit} from './core.js';
 
 const KEY = 'corgi-pocket-v1:' + new URL('./', location.href).pathname;
 const $ = (s, r = document) => r.querySelector(s);
@@ -63,13 +63,15 @@ function expenseHTML(e) {
   const meta = e.kind === 'opening' ? owedText(e.balance) : `${esc(N()[e.payer])} trả${e.payer === 'a' && e.sourceId ? ' · ' + esc(sourceName(e.sourceId)) : ''} · ${esc(e.category)}`;
   return `<article class="expense ${company ? 'is-company' : ''}"><span class="cat-icon">${e.kind === 'opening' ? '↶' : company ? '💼' : catIcon(e.category)}</span>
     <div class="expense-body"><div class="expense-name">${esc(e.description)}</div><div class="expense-meta">${meta}</div>${e.note ? `<div class="expense-note">${esc(e.note)}</div>` : ''}
-    <div class="expense-tags"><span class="tag ${company ? 'orange' : ''}">${esc(splitLabel(e))}</span>${status}</div></div>
+    <div class="expense-tags"><span class="tag ${company ? 'orange' : ''}">${esc(splitLabel(e))}</span>${status}${e.review ? reviewTag(e.id) : ''}</div></div>
     <div class="expense-side"><span class="expense-amount">${fmt(amount)}</span>${locked ? '' : `<div>${e.kind !== 'opening' ? `<button class="text-btn" data-edit="${e.id}">Sửa</button>` : ''}<button class="text-btn danger" data-delete="${e.id}">Xoá</button></div>`}</div></article>`;
 }
 
+const reviewTag = id => `<button class="tag orange" data-reviewed="${id}" title="Bấm để bỏ đánh dấu">🔎 Cần xem lại ✓</button>`;
+const reviewItems = () => [...db.expenses.filter(e => e.review), ...db.incomes.filter(i => i.review)];
 function incomeHTML(i) {
   return `<article class="expense is-income"><span class="cat-icon">${incomeIcon(i.category)}</span>
-    <div class="expense-body"><div class="expense-name">${esc(i.description)}</div><div class="expense-meta">${esc(i.category)} · vào ${esc(sourceName(i.sourceId))}</div>${i.note ? `<div class="expense-note">${esc(i.note)}</div>` : ''}</div>
+    <div class="expense-body"><div class="expense-name">${esc(i.description)}</div><div class="expense-meta">${esc(i.category)} · vào ${esc(sourceName(i.sourceId))}</div>${i.note ? `<div class="expense-note">${esc(i.note)}</div>` : ''}${i.review ? `<div class="expense-tags">${reviewTag(i.id)}</div>` : ''}</div>
     <div class="expense-side"><span class="expense-amount green">+${fmt(i.amount)}</span><div><button class="text-btn" data-edit-income="${i.id}">Sửa</button><button class="text-btn danger" data-delete-income="${i.id}">Xoá</button></div></div></article>`;
 }
 
@@ -125,6 +127,7 @@ function renderHome() {
     <button class="stat link" data-page="nhi"><div class="stat-label">${esc(N().a)} ⇄ ${esc(N().b)}</div><div class="stat-value">${fmt(Math.abs(net))}</div><div class="stat-note">${esc(netText(net))}</div></button>
     <button class="stat link" data-page="company"><div class="stat-label">${esc(N().c)} còn nợ</div><div class="stat-value orange">${fmt(comp)}</div><div class="stat-note">${companyPending(db.expenses).length} khoản chờ hoàn ứng</div></button>
   </section>
+  ${reviewItems().length ? `<button class="due-banner soft" data-page="review"><strong>🔎 ${reviewItems().length} khoản từ sao kê cần xem lại</strong><span>Chi cho ai, mục đích gì · bấm để xem và sửa dần</span></button>` : ''}
   ${walletHTML(false)}
   ${dueSoonHTML()}
   ${needBackup ? `<button class="due-banner soft" data-page="settings"><strong>💾 Nên tải backup</strong><span>${backupDays === null ? 'Chưa có bản backup nào.' : `Lần gần nhất ${backupDays} ngày trước.`} Dữ liệu chỉ nằm trên máy này.</span></button>` : ''}
@@ -239,6 +242,14 @@ function renderFlow() {
     <div class="list">${incomes.length ? incomes.map(incomeHTML).join('') : empty('Chưa ghi khoản thu', 'Lương, thưởng, tiền vay, thu nhập khác…', '<button class="btn ghost small" data-action="add-income">＋ Ghi khoản thu</button>')}</div></section>`;
 }
 
+// ---------- trang Cần xem lại ----------
+function renderReview() {
+  const list = reviewItems().sort((a, b) => b.date.localeCompare(a.date) || (b.amount - a.amount));
+  let lastMonth = '';
+  return head('Cần xem lại', 'Khoản nhập từ sao kê chưa rõ chi cho ai / mục đích gì. Bấm Sửa để chọn danh mục, cách chia. Đúng rồi thì bấm “Cần xem lại ✓” để bỏ đánh dấu.') +
+  `<div class="list">${list.length ? list.map(x => { const m = x.date.slice(0, 7), sep = m !== lastMonth ? `<div class="field-label" style="margin-top:8px">${monthName(m)}</div>` : ''; lastMonth = m; return sep + (x.payer ? expenseHTML(x) : incomeHTML(x)); }).join('') : empty('Xong hết rồi', 'Không còn khoản nào cần xem lại 🐶')}</div>`;
+}
+
 // ---------- trang Cài đặt ----------
 function renderSettings() {
   const backup = db.lastBackup ? new Date(db.lastBackup).toLocaleDateString('vi-VN') : 'chưa có';
@@ -259,14 +270,14 @@ function renderSettings() {
   <section class="panel"><h2>Loại khoản thu</h2><div class="chips">${db.incomeCategories.map((c, i) => `<span class="chip">${incomeIcon(c)} ${esc(c)}<button data-del-icat="${i}" aria-label="Xoá ${esc(c)}">×</button></span>`).join('')}</div>
     <form id="incomeCategoryForm" class="inline-form"><input name="category" required maxlength="100" placeholder="Ví dụ: Cho thuê, Freelance" aria-label="Loại thu mới"><button class="btn ghost small">＋ Thêm</button></form></section>
   <section class="panel"><h2>Backup dữ liệu</h2><p>Dữ liệu chỉ nằm trong điện thoại này, không tự đồng bộ. Tải backup mỗi 2 tuần và lưu vào iCloud Drive. Lần gần nhất: <b>${backup}</b>.</p>
-    <div class="btn-row"><button class="btn primary small" data-action="backup">↓ Tải backup</button><button class="btn ghost small" data-action="restore">↑ Khôi phục</button><button class="btn ghost small" data-action="csv">↓ Excel chi tiêu</button><button class="btn ghost small" data-action="fixed-csv">↓ Excel cố định</button><button class="btn ghost small" data-action="income-csv">↓ Excel khoản thu</button></div>
+    <div class="btn-row"><button class="btn primary small" data-action="backup">↓ Tải backup</button><button class="btn ghost small" data-action="restore">↑ Khôi phục</button><button class="btn ghost small" data-action="import">＋ Nhập thêm từ file</button><button class="btn ghost small" data-action="csv">↓ Excel chi tiêu</button><button class="btn ghost small" data-action="fixed-csv">↓ Excel cố định</button><button class="btn ghost small" data-action="income-csv">↓ Excel khoản thu</button></div>
     ${loadError ? '<button class="btn ghost small" data-action="raw-backup">Tải dữ liệu gốc chưa đọc được</button>' : ''}</section>
   <section class="panel"><h2>Cài lên iPhone</h2><p>1. Mở link app bằng <b>Safari</b>.<br>2. Bấm nút Chia sẻ ⎋ → <b>Thêm vào MH chính</b>.<br>3. Mở app bằng icon Corgi. Sau lần mở đầu, app chạy được cả khi không có mạng.</p><span class="tag green" id="offlineSetting">Đang kiểm tra offline…</span></section>
-  <p class="footer-note">Corgi Pocket v1.2 · làm riêng cho ${esc(N().full || N().a)} 🐶</p>`;
+  <p class="footer-note">Corgi Pocket v1.3 · làm riêng cho ${esc(N().full || N().a)} 🐶</p>`;
 }
 
 function render() {
-  const pages = {home: renderHome, nhi: renderNhi, company: renderCompany, fixed: renderFixed, flow: renderFlow, settings: renderSettings};
+  const pages = {review: renderReview, home: renderHome, nhi: renderNhi, company: renderCompany, fixed: renderFixed, flow: renderFlow, settings: renderSettings};
   $('#view').innerHTML = (loadError ? '<div class="notice">Chưa đọc được dữ liệu đã lưu. App đang giữ nguyên bản gốc; vào Cài đặt để tải bản gốc hoặc khôi phục backup.</div>' : '') + pages[page]();
   $$('.tabbar [data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === page));
   $('#tabNhi').textContent = N().b;
@@ -555,6 +566,7 @@ async function action(a) {
   if (a === 'backup') { const at = new Date().toISOString(); const next = {...structuredClone(db), lastBackup: at}; download(JSON.stringify(next, null, 2), `corgi-pocket-backup-${today()}.json`, 'application/json'); if (commit(next)) render(); toast('Đã tạo file backup. Lưu vào iCloud Drive nhé.'); return; }
   if (a === 'raw-backup') { download(localStorage.getItem(KEY) || '', 'corgi-pocket-recovery.txt', 'text/plain'); return; }
   if (a === 'restore') return $('#restoreFile').click();
+  if (a === 'import') return $('#importFile').click();
   if (a === 'csv') { csvDownload([['Ngày', 'Mô tả', 'Danh mục', 'Số tiền', 'Người trả', 'Cách chia', 'Phần ' + N().a, 'Phần ' + N().b, 'Phần ' + N().c, 'Số dư (+ ' + N().b + ' nợ)', 'Chốt với ' + N().b, 'Hoàn ứng', 'Ghi chú', 'Nguồn tiền'], ...db.expenses.slice().sort((x, y) => x.date.localeCompare(y.date)).map(e => { const p = e.kind === 'opening' ? {a: 0, b: 0, c: 0} : shares(e.amount, e.split, e.custom); return [e.date, e.description, e.category || 'Nợ ban đầu', e.amount || 0, e.payer ? N()[e.payer] : '', splitLabel(e), p.a, p.b, p.c, debt(e), e.settlementId ? 'Đã chốt' : '', e.split === 'company' ? (e.reimburseId ? 'Đã hoàn' : 'Chờ hoàn') : '', e.note || '', e.payer === 'a' ? sourceName(e.sourceId) : '']; })], `corgi-chi-tieu-${today()}.csv`); return; }
   if (a === 'fixed-csv') { csvDownload([['Loại', 'Tên', 'Số tiền', 'Hạn trả', 'Đã trả', 'Ngày trả', 'Ghi chú'], ...db.fixed.slice().sort((x, y) => x.due.localeCompare(y.due)).map(f => [FIXED_TYPES[f.type], f.name, f.amount, f.due, f.paid ? 'Có' : 'Chưa', f.paidDate || '', f.note || ''])], `corgi-co-dinh-${today()}.csv`); }
 }
@@ -575,6 +587,7 @@ document.addEventListener('click', async ev => {
   if (b.dataset.edit) return openExpense(b.dataset.edit);
   if (b.dataset.editIncome) return openIncome(b.dataset.editIncome);
   if (b.dataset.setSource) return openSourceSet(b.dataset.setSource);
+  if (b.dataset.reviewed) { const id = b.dataset.reviewed; if (mutate(d => { for (const x of [...d.expenses, ...d.incomes]) if (x.id === id) delete x.review; })) { render(); toast('Đã bỏ đánh dấu ✓'); } return; }
   if (b.dataset.deleteIncome) {
     const row = db.incomes.find(r => r.id === b.dataset.deleteIncome);
     if (await confirmAction('Xoá khoản thu?', row.description + ' · ' + fmt(row.amount), 'Xoá')) if (mutate(d => { d.incomes = d.incomes.filter(r => r.id !== row.id); })) { render(); toast('Đã xoá.'); }
@@ -631,6 +644,17 @@ document.addEventListener('change', async ev => {
   const t = ev.target;
   if (t.id === 'nhiScope') { nhiScope = t.value; return render(); }
   if (t.dataset.pick) { t.checked ? unpicked.delete(t.dataset.pick) : unpicked.add(t.dataset.pick); return render(); }
+  if (t.id === 'importFile') {
+    const file = t.files[0]; t.value = ''; if (!file) return;
+    try {
+      const r = mergeImport(db, JSON.parse(await file.text()), uid, new Date().toISOString());
+      if (!r.expenses && !r.incomes) { toast('File này đã nhập rồi, không có khoản mới.'); return; }
+      if (await confirmAction('Nhập thêm dữ liệu?', `${r.expenses} khoản chi + ${r.incomes} khoản thu, nguồn “${r.source}”.${r.duplicates ? `\n${r.duplicates} khoản đã có, sẽ bỏ qua.` : ''}${r.setOpening ? '\nSố dư nguồn này lấy theo số dư cuối sao kê.' : ''}\n\nDữ liệu đang có được giữ nguyên.`, 'Nhập thêm')) {
+        if (commit(r.db)) { render(); toast(`Đã nhập ${r.expenses + r.incomes} khoản 🐶`); }
+      }
+    } catch (error) { toast(error.message || 'Không đọc được file.'); }
+    return;
+  }
   if (t.id === 'restoreFile') {
     const file = t.files[0]; if (!file) return;
     try {
@@ -661,7 +685,7 @@ function updateOffline() {
 addEventListener('online', updateOffline); addEventListener('offline', updateOffline);
 addEventListener('storage', e => { if (e.key === KEY) { try { db = e.newValue ? migrateDB(JSON.parse(e.newValue)) : freshDB(); loadError = false; } catch { loadError = true; } render(); } });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js', {updateViaCache: 'none'}).then(async r => { await navigator.serviceWorker.ready; offlineReady = !!r.active; updateOffline(); }).catch(updateOffline);
-const PAGES = ['home', 'nhi', 'company', 'fixed', 'flow', 'settings'];
+const PAGES = ['home', 'nhi', 'company', 'fixed', 'flow', 'settings', 'review'];
 addEventListener('hashchange', () => { const h = location.hash.slice(1); if (PAGES.includes(h) && h !== page) { page = h; render(); } });
 const hash = location.hash.slice(1); if (PAGES.includes(hash)) page = hash;
 render(); updateOffline(); notifyDue();
