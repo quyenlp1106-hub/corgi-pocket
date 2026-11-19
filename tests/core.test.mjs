@@ -96,7 +96,7 @@ test('dữ liệu bản cũ tự nâng lên bản mới', () => {
   const old = {...freshDB(), version: 1}; delete old.sources; delete old.incomes; delete old.incomeCategories;
   old.expenses = [exp({amount: 200})];
   const d = migrateDB(old);
-  assert.equal(d.version, 3); assert.ok(d.sources.length >= 4); assert.deepEqual(d.incomes, []); assert.deepEqual(d.adjustments, []);
+  assert.equal(d.version, 4); assert.ok(d.sources.length >= 4); assert.deepEqual(d.incomes, []); assert.deepEqual(d.adjustments, []);
 });
 
 test('dòng tiền: quẹt thẻ không tính trùng, tiền Nhi trả & công ty hoàn tự vào', () => {
@@ -230,4 +230,23 @@ test('applyPack: sửa, thêm, bỏ lịch cố định; chỉ đụng kỳ chư
   assert.equal(d.templates.find(t => t.id === 'new-tpl').principal, null);
   const g = generateFixed(d, '2026-11', () => 'g1');
   assert.equal((g.db || g).fixed.find(f => f.templateId === 'new-tpl').due, '2026-11-23');
+});
+
+test('kết sổ công ty & trả cố định từ nhiều nguồn', () => {
+  let db = freshDB();
+  db.expenses = [exp({split: 'company', amount: 300000}), exp({split: 'company', amount: 200000}), exp({amount: 100000})];
+  db = migrateDB({...db, version: 3});
+  assert.equal(companyPending(db.expenses).length, 0);
+  assert.equal(db.reimbursements[0].amount, 500000);
+  assert.equal(cashflow(db, db.reimbursements[0].at.slice(0, 7)).fromCompany, 0);
+  const [s1, s2] = db.sources.filter(x => x.kind === 'bank');
+  Object.assign(s1, {opening: 1000000, openingDate: '2026-10-01', openingAt: '2026-10-01T00:00:00Z'});
+  Object.assign(s2, {opening: 1000000, openingDate: '2026-10-01', openingAt: '2026-10-01T00:00:00Z'});
+  db.fixed = [{id: 'f1', type: 'card', name: 'Thẻ X', amount: 900000, due: '2026-10-20', paid: true, paidDate: '2026-10-20', paidAt: '2026-10-20T01:00:00Z', paidFrom: null,
+    paidSplit: [{sourceId: s1.id, amount: 600000}, {sourceId: s2.id, amount: 300000}]}];
+  validateDB(db);
+  assert.equal(balance(db, s1), 400000);
+  assert.equal(balance(db, s2), 700000);
+  db.fixed[0].paidSplit[1].amount = 400000;
+  assert.throws(() => validateDB(db));
 });
