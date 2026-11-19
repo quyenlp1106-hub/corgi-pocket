@@ -126,7 +126,9 @@ export function freshDB() {
     sources: defaultSources(), incomes: [], incomeCategories: ['Lương', 'Thưởng', 'Vay', 'Thu nhập khác'], adjustments: [], lastNotified: null};
 }
 function defaultSources() {
-  return [{id: 'cash', name: 'Tiền mặt', kind: 'cash'}, {id: 'bank', name: 'Tài khoản ngân hàng', kind: 'bank'}, {id: 'wallet', name: 'Ví điện tử', kind: 'wallet'}, {id: 'later', name: 'Trả sau', kind: 'later'}];
+  return [['acb', 'ACB tiền mặt', 'bank'], ['tcb', 'TCB tiền mặt', 'bank'], ['tcb-card', 'TCB thẻ tín dụng', 'card'], ['momo-later', 'Momo trả sau', 'later'],
+    ['tpb-card', 'TPB thẻ tín dụng', 'card'], ['vikki-card', 'Vikki thẻ tín dụng', 'card'], ['hds-card', 'HDSaison thẻ tín dụng', 'card'], ['cake-card', 'Cake thẻ tín dụng', 'card']]
+    .map(([id, name, kind]) => ({id, name, kind}));
 }
 
 // Bản 1 → 2: thêm nguồn tiền và khoản thu. Khoản chi cũ để trống nguồn.
@@ -305,6 +307,84 @@ export function mergeImport(db, pack, makeId, nowIso) {
   next.expenses.push(...exp); next.incomes.push(...inc);
   validateDB(next);
   return {db: next, expenses: exp.length, incomes: inc.length, duplicates: pack.expenses.length + pack.incomes.length - exp.length - inc.length, source: src.name, setOpening};
+}
+
+// Gộp nguồn `fromId` vào `toId`: mọi khoản chi/thu, trả cố định, chỉnh tay, chốt sổ đều chuyển sang nguồn giữ lại
+export function mergeSource(db, fromId, toId) {
+  if (fromId === toId) return;
+  for (const x of [...db.expenses, ...db.incomes, ...db.adjustments]) if (x.sourceId === fromId) x.sourceId = toId;
+  for (const f of db.fixed) if (f.paidFrom === fromId) f.paidFrom = toId;
+  for (const x of [...db.settlements, ...db.reimbursements]) if (x.via === fromId) x.via = toId;
+  const from = db.sources.find(x => x.id === fromId), to = db.sources.find(x => x.id === toId);
+  if (from?.templateId && !to.templateId) to.templateId = from.templateId;
+  db.sources = db.sources.filter(x => x.id !== fromId);
+}
+export const sourceInUse = (db, id) => db.expenses.some(e => e.sourceId === id) || db.incomes.some(i => i.sourceId === id) || db.adjustments.some(a => a.sourceId === id)
+  || db.fixed.some(f => f.paidFrom === id) || [...db.settlements, ...db.reimbursements].some(x => x.via === id);
+
+// Gói nhập bản 2: dọn nguồn tiền (đổi tên, gộp, chốt số dư), xoá khoản trùng, thêm/cập nhật khoản từ sao kê.
+// Khoản đã có: chỉ cập nhật nếu còn “cần xem” hoặc “Chưa phân loại”; khoản chị đã phân loại thì giữ nguyên.
+export function applyPack(db, pack, makeId, nowIso) {
+  if (!pack || pack.corgiImport !== 2) throw Error('File không phải file nhập của Corgi Pocket.');
+  const next = structuredClone(db), r = {renamed: [], merged: [], created: [], removed: [], deleted: 0, added: 0, updated: 0, kept: 0};
+  const byName = n => next.sources.find(x => x.name.toLowerCase() === String(n).trim().toLowerCase());
+  for (const s of pack.sources || []) {
+    if (!s || typeof s.name !== 'string' || !SOURCE_KINDS[s.kind]) throw Error('Nguồn tiền trong file không hợp lệ.');
+    const olds = [...new Set([s.name, ...(s.from || [])].map(byName).filter(Boolean))];
+    let keep = olds.find(x => x.templateId) || olds.find(x => x.name.toLowerCase() === s.name.toLowerCase()) || olds[0];
+    if (!keep) { keep = {id: makeId(), name: s.name, kind: s.kind}; next.sources.push(keep); r.created.push(s.name); }
+    for (const o of olds) if (o !== keep) { mergeSource(next, o.id, keep.id); r.merged.push(`${o.name} → ${s.name}`); }
+    if (keep.name !== s.name && olds.length) r.renamed.push(`${keep.name} → ${s.name}`);
+    keep.name = s.name; keep.kind = s.kind;
+    if (Number.isSafeInteger(s.opening) && dateValid(s.openingDate)) Object.assign(keep, {opening: s.opening, openingDate: s.openingDate, openingAt: s.openingAt || nowIso});
+  }
+  const order = (pack.sources || []).map(s => s.name.toLowerCase()), rank = x => { const i = order.indexOf(x.name.toLowerCase()); return i < 0 ? order.length : i; };
+  next.sources.sort((x, y) => rank(x) - rank(y));
+  const del = new Set(pack.deleteIds || []);
+  const before = next.expenses.length + next.incomes.length;
+  next.expenses = next.expenses.filter(e => !del.has(e.id) || e.settlementId || e.reimburseId); next.incomes = next.incomes.filter(i => !del.has(i.id));
+  r.deleted = before - next.expenses.length - next.incomes.length;
+  for (const n of pack.removeSources || []) {
+    const x = byName(n);
+    if (x && !sourceInUse(next, x.id) && next.sources.length > 1) { next.sources = next.sources.filter(y => y !== x); r.removed.push(x.name); }
+  }
+  for (const c of pack.categories || []) if (!next.categories.includes(c)) next.categories.push(c);
+  for (const c of pack.incomeCategories || []) if (!next.incomeCategories.includes(c)) next.incomeCategories.push(c);
+  for (const [key, list] of [['expenses', pack.expenses || []], ['incomes', pack.incomes || []]]) for (const raw of list) {
+    const {source: sname, ...item} = raw, src = sname ? byName(sname) : null;
+    if (sname && !src) throw Error(`Không tìm thấy nguồn “${sname}”.`);
+    if (src) item.sourceId = src.id;
+    const cur = next[key].find(x => x.id === item.id);
+    if (!cur) { next[key].push({createdAt: nowIso, ...item}); r.added++; }
+    else if ((cur.review || cur.category === 'Chưa phân loại') && !cur.settlementId && !cur.reimburseId) { Object.assign(cur, item); r.updated++; }
+    else r.kept++;
+  }
+  // Lịch cố định: sửa/thêm/xoá mẫu hằng tháng; chỉ đụng các kỳ chưa trả từ tháng hiện tại trở đi
+  const month = nowIso.slice(0, 7);
+  Object.assign(r, {tplAdded: [], tplUpdated: [], tplRemoved: [], fixedDeleted: 0});
+  const delFixed = new Set(pack.deleteFixedIds || []), nFixed = next.fixed.length;
+  next.fixed = next.fixed.filter(f => f.paid || !delFixed.has(f.id));
+  r.fixedDeleted = nFixed - next.fixed.length;
+  for (const t of pack.templates || []) {
+    if (!t || (t.match == null && t.name == null)) throw Error('Lịch cố định trong file không hợp lệ.');
+    const key = String(t.match ?? t.name).trim().toLowerCase();
+    const cur = next.templates.find(x => x.id === t.match) || next.templates.find(x => x.name.toLowerCase() === key);
+    const open = x => !x.paid && x.templateId === cur.id && x.due.slice(0, 7) >= month;
+    if (t.remove) {
+      if (!cur) continue;
+      next.templates = next.templates.filter(x => x !== cur);
+      next.fixed = next.fixed.filter(x => !open(x));
+      r.tplRemoved.push(cur.name);
+      continue;
+    }
+    const fields = Object.fromEntries(['type', 'name', 'amount', 'day', 'start', 'principal', 'note'].filter(k => t[k] !== undefined).map(k => [k, t[k]]));
+    if (!cur) { next.templates.push({id: makeId(), principal: null, note: '', ...fields}); r.tplAdded.push(fields.name); continue; }
+    Object.assign(cur, fields);
+    for (const f of next.fixed) if (open(f)) Object.assign(f, {type: cur.type, name: cur.name, amount: cur.amount, due: dueDate(f.due.slice(0, 7), cur.day)});
+    r.tplUpdated.push(cur.name);
+  }
+  validateDB(next);
+  return {db: next, ...r};
 }
 
 export function csvCell(v) {

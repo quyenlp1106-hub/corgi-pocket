@@ -1,4 +1,4 @@
-import {moneyInput, formatMoney, shares, debt, totals, monthOf, outstanding, companyPending, closePeriod, undoPeriod, reimburse, undoReimburse, generateFixed, debtRemaining, dueDate, freshDB, validateDB, migrateDB, cashflow, wallet, balance, upcoming, buildICS, isConfigured, mergeImport, dateValid, csvCell, FIXED_TYPES, SOURCE_KINDS, isCredit} from './core.js';
+import {moneyInput, formatMoney, shares, debt, totals, monthOf, outstanding, companyPending, closePeriod, undoPeriod, reimburse, undoReimburse, generateFixed, debtRemaining, dueDate, freshDB, validateDB, migrateDB, cashflow, wallet, balance, upcoming, buildICS, isConfigured, mergeImport, applyPack, sourceInUse, dateValid, csvCell, FIXED_TYPES, SOURCE_KINDS, isCredit} from './core.js';
 
 const KEY = 'corgi-pocket-v1:' + new URL('./', location.href).pathname;
 const $ = (s, r = document) => r.querySelector(s);
@@ -264,8 +264,8 @@ function renderSettings() {
     <button class="btn primary small" data-action="ics">📅 Tải lịch nhắc (${db.templates.length + db.fixed.filter(f => !f.paid && !f.templateId && f.due >= today()).length} khoản)</button>
     <p style="margin-top:14px"><b>Cách 2 · Thông báo của app:</b> mỗi ngày lần đầu mở app, nếu có khoản tới hạn trong 3 ngày thì app bật thông báo.</p>
     <button class="btn ghost small" data-action="notify">${'Notification' in window && Notification.permission === 'granted' ? '✓ Đã bật thông báo' : '🔔 Bật thông báo'}</button></section>
-  <section class="panel"><h2>Nguồn tiền</h2><p>Chọn khi ghi khoản chi / khoản thu. Thẻ tín dụng thêm ở Góc cố định sẽ tự có ở đây. Số dư nhập ở tab Dòng tiền → Ví của chị.</p>
-    <div class="chips">${db.sources.map(x => `<span class="chip">${sourceLabel(x)}<button data-del-source="${x.id}" aria-label="Xoá ${esc(x.name)}">×</button></span>`).join('')}</div>
+  <section class="panel"><h2>Nguồn tiền</h2><p>Chọn khi ghi khoản chi / khoản thu. Bấm tên để đổi tên, loại hoặc số dư · × để xoá. Thẻ tín dụng thêm ở Góc cố định sẽ tự có ở đây.</p>
+    <div class="chips">${db.sources.map(x => `<span class="chip"><button class="chip-name" data-set-source="${x.id}" aria-label="Sửa ${esc(x.name)}">${sourceLabel(x)}</button><button data-del-source="${x.id}" aria-label="Xoá ${esc(x.name)}">×</button></span>`).join('')}</div>
     <form id="sourceForm" class="inline-form"><input name="name" required maxlength="60" placeholder="Ví dụ: Techcombank, Momo" aria-label="Tên nguồn"><select name="kind" aria-label="Loại nguồn" style="max-width:130px">${Object.entries(SOURCE_KINDS).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><button class="btn ghost small">＋</button></form></section>
   <section class="panel"><h2>Loại khoản thu</h2><div class="chips">${db.incomeCategories.map((c, i) => `<span class="chip">${incomeIcon(c)} ${esc(c)}<button data-del-icat="${i}" aria-label="Xoá ${esc(c)}">×</button></span>`).join('')}</div>
     <form id="incomeCategoryForm" class="inline-form"><input name="category" required maxlength="100" placeholder="Ví dụ: Cho thuê, Freelance" aria-label="Loại thu mới"><button class="btn ghost small">＋ Thêm</button></form></section>
@@ -273,7 +273,7 @@ function renderSettings() {
     <div class="btn-row"><button class="btn primary small" data-action="backup">↓ Tải backup</button><button class="btn ghost small" data-action="restore">↑ Khôi phục</button><button class="btn ghost small" data-action="import">＋ Nhập thêm từ file</button><button class="btn ghost small" data-action="csv">↓ Excel chi tiêu</button><button class="btn ghost small" data-action="fixed-csv">↓ Excel cố định</button><button class="btn ghost small" data-action="income-csv">↓ Excel khoản thu</button></div>
     ${loadError ? '<button class="btn ghost small" data-action="raw-backup">Tải dữ liệu gốc chưa đọc được</button>' : ''}</section>
   <section class="panel"><h2>Cài lên iPhone</h2><p>1. Mở link app bằng <b>Safari</b>.<br>2. Bấm nút Chia sẻ ⎋ → <b>Thêm vào MH chính</b>.<br>3. Mở app bằng icon Corgi. Sau lần mở đầu, app chạy được cả khi không có mạng.</p><span class="tag green" id="offlineSetting">Đang kiểm tra offline…</span></section>
-  <p class="footer-note">Corgi Pocket v1.3 · làm riêng cho ${esc(N().full || N().a)} 🐶</p>`;
+  <p class="footer-note">Corgi Pocket v1.4 · làm riêng cho ${esc(N().full || N().a)} 🐶</p>`;
 }
 
 function render() {
@@ -300,8 +300,9 @@ function drawConfirmChips() {
 }
 function lastVia() {
   const used = [...db.fixed.filter(f => f.paidFrom).map(f => [f.paidAt || f.paidDate, f.paidFrom]), ...[...db.settlements, ...db.reimbursements].filter(x => x.via).map(x => [x.at, x.via])].sort((a, b) => b[0].localeCompare(a[0]));
-  return used.find(([, id]) => source(id))?.[1] || 'bank';
+  return used.find(([, id]) => source(id))?.[1] || firstCash();
 }
+const firstCash = () => (db.sources.find(x => !isCredit(x.kind)) || db.sources[0])?.id || '';
 const optionHTML = (arr, value) => arr.map(c => `<option ${c === value ? 'selected' : ''} value="${esc(c)}">${esc(c)}</option>`).join('');
 const chipHTML = (name, list, value) => list.map(([v, l]) => `<button type="button" role="radio" data-chip="${name}" data-value="${v}" aria-checked="${v === value}" class="${v === value ? 'on' : ''}">${l}</button>`).join('');
 
@@ -378,7 +379,7 @@ $('#expenseForm').onsubmit = ev => {
 // ---------- form khoản thu ----------
 function lastSource(list) {
   const rows = db[list].filter(r => r.sourceId && source(r.sourceId)).sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
-  return rows[0]?.sourceId || (list === 'incomes' ? 'bank' : 'cash');
+  return rows[0]?.sourceId || firstCash();
 }
 const I = () => $('#incomeForm').elements;
 function drawIncomeChips() {
@@ -414,7 +415,8 @@ $('#incomeForm').onsubmit = ev => {
 // ---------- nhập / chỉnh số dư ----------
 function openSourceSet(id) {
   const x = source(id), credit = isCredit(x.kind), b = balance(db, x), f = $('#sourceSetForm'); f.reset(); const e = f.elements;
-  e.sid.value = id; e.limit.value = x.limit || '';
+  e.sid.value = id; e.limit.value = x.limit || ''; e.name.value = x.name;
+  e.kind.innerHTML = Object.entries(SOURCE_KINDS).map(([k, l]) => `<option value="${k}" ${k === x.kind ? 'selected' : ''}>${l}</option>`).join('');
   $('#sourceTitle').textContent = sourceLabel(x);
   $('#sourceAmountLabel').textContent = b === null ? (credit ? 'Dư nợ hiện tại (đang nợ thẻ bao nhiêu)' : 'Số dư hiện tại') : (credit ? 'Dư nợ thực tế bây giờ' : 'Số dư thực tế bây giờ');
   $('#sourceNow').textContent = b === null ? 'Nhập 1 lần. Từ giờ app tự cộng khoản thu, trừ khoản chi của nguồn này.' : `App đang tính: ${credit ? 'dư nợ ' + fmt(b) : signed(b)}. Để trống nếu đúng rồi, hoặc nhập số thật để app chỉnh lại.`;
@@ -425,15 +427,18 @@ function openSourceSet(id) {
 }
 $('#sourceSetForm').onsubmit = ev => {
   ev.preventDefault();
-  const e = ev.target.elements, x = source(e.sid.value), credit = isCredit(x.kind), raw = e.amount.value.trim();
+  const e = ev.target.elements, x = source(e.sid.value), raw = e.amount.value.trim(), name = e.name.value.trim(), kind = e.kind.value, credit = isCredit(kind);
+  if (!name || db.sources.some(y => y.id !== x.id && y.name.toLowerCase() === name.toLowerCase())) { toast('Tên nguồn trống hoặc đã có.'); return; }
   let amount = raw ? moneyInput(raw) : null; const limit = e.limit.value.trim() ? moneyInput(e.limit.value) : null;
   if ((raw && !Number.isFinite(amount)) || (e.limit.value.trim() && !Number.isFinite(limit))) { toast('Số tiền chưa đúng định dạng.'); return; }
   if (amount !== null && !credit && e.negative.checked) amount = -amount;
   const now = new Date().toISOString(), b = balance(db, x);
-  if (b === null && amount === null && limit === null) { toast('Nhập số dư nhé.'); return; }
+  const renamed = name !== x.name || kind !== x.kind;
+  if (b === null && amount === null && limit === null && !renamed) { toast('Nhập số dư nhé.'); return; }
   if (mutate(d => {
     const t = d.sources.find(y => y.id === x.id);
-    if (credit) t.limit = limit;
+    t.name = name; t.kind = kind;
+    if (credit) t.limit = limit; else delete t.limit;
     if (amount === null) return;
     if (b === null) Object.assign(t, {opening: amount, openingDate: today(), openingAt: now});
     else if (amount !== b) d.adjustments.push({id: uid(), sourceId: x.id, date: today(), at: now, amount: amount - b, note: 'Chỉnh theo số thực tế'});
@@ -595,7 +600,7 @@ document.addEventListener('click', async ev => {
   }
   if (b.dataset.delSource) {
     const x = source(b.dataset.delSource);
-    if (db.expenses.some(e => e.sourceId === x.id) || db.incomes.some(i => i.sourceId === x.id)) { toast(`“${x.name}” đang có khoản chi/thu, chưa xoá được.`); return; }
+    if (sourceInUse(db, x.id)) { toast(`“${x.name}” đang có khoản chi/thu, chưa xoá được. Đổi tên thay vì xoá nhé.`); return; }
     if (db.sources.length <= 1) { toast('Cần giữ ít nhất một nguồn tiền.'); return; }
     if (await confirmAction('Xoá nguồn tiền?', x.name, 'Xoá')) if (mutate(d => { d.sources = d.sources.filter(s => s.id !== x.id); })) render();
     return;
@@ -647,7 +652,24 @@ document.addEventListener('change', async ev => {
   if (t.id === 'importFile') {
     const file = t.files[0]; t.value = ''; if (!file) return;
     try {
-      const r = mergeImport(db, JSON.parse(await file.text()), uid, new Date().toISOString());
+      const pack = JSON.parse(await file.text());
+      if (pack?.corgiImport === 2) {
+        const r = applyPack(db, pack, uid, new Date().toISOString()), lines = [];
+        if (r.renamed.length) lines.push('Đổi tên: ' + r.renamed.join(', '));
+        if (r.merged.length) lines.push('Gộp: ' + r.merged.join(', '));
+        if (r.created.length) lines.push('Thêm nguồn: ' + r.created.join(', '));
+        if (r.removed.length) lines.push('Bỏ nguồn không dùng: ' + r.removed.join(', '));
+        if (r.deleted) lines.push(`Xoá ${r.deleted} khoản trùng`);
+        if (r.added || r.updated) lines.push(`Thêm ${r.added} khoản · cập nhật ${r.updated} khoản chưa phân loại`);
+        if (r.kept) lines.push(`${r.kept} khoản chị đã phân loại: giữ nguyên`);
+        if (r.tplAdded.length) lines.push('Thêm lịch cố định: ' + r.tplAdded.join(', '));
+        if (r.tplUpdated.length) lines.push('Sửa lịch cố định: ' + r.tplUpdated.join(', '));
+        if (r.tplRemoved.length) lines.push('Bỏ lịch cố định: ' + r.tplRemoved.join(', '));
+        if (r.fixedDeleted) lines.push(`Xoá ${r.fixedDeleted} khoản cố định lẻ chưa trả`);
+        if (await confirmAction(pack.label || 'Nhập dữ liệu?', lines.join('\n') + '\n\nNên tải backup trước khi nhập.', 'Nhập')) if (commit(r.db)) { render(); toast('Đã nhập xong 🐶'); }
+        return;
+      }
+      const r = mergeImport(db, pack, uid, new Date().toISOString());
       if (!r.expenses && !r.incomes) { toast('File này đã nhập rồi, không có khoản mới.'); return; }
       if (await confirmAction('Nhập thêm dữ liệu?', `${r.expenses} khoản chi + ${r.incomes} khoản thu, nguồn “${r.source}”.${r.duplicates ? `\n${r.duplicates} khoản đã có, sẽ bỏ qua.` : ''}${r.setOpening ? '\nSố dư nguồn này lấy theo số dư cuối sao kê.' : ''}\n\nDữ liệu đang có được giữ nguyên.`, 'Nhập thêm')) {
         if (commit(r.db)) { render(); toast(`Đã nhập ${r.expenses + r.incomes} khoản 🐶`); }

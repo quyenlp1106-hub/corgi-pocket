@@ -91,6 +91,7 @@
 <dialog id="sourceDialog" class="sheet"><form id="sourceSetForm">
   <div class="sheet-head"><h2 id="sourceTitle">Số dư</h2><button type="button" data-close="sourceDialog" class="icon-btn" aria-label="Đóng">×</button></div>
   <input type="hidden" name="sid">
+  <div class="source-edit"><label><span>Tên nguồn</span><input name="name" required maxlength="60" autocomplete="off"></label><label><span>Loại</span><select name="kind"></select></label></div>
   <p id="sourceNow" class="hint"></p>
   <label class="amount-field"><span id="sourceAmountLabel">Số dư hiện tại</span><div class="amount-input"><input name="amount" inputmode="decimal" placeholder="0" autocomplete="off"></div></label>
   <label class="check" id="sourceNegField"><input type="checkbox" name="negative"> Đang âm (thấu chi / nợ)</label>

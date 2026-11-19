@@ -156,6 +156,9 @@ details.history-row[open] .btn{margin-top:8px}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
 .chip{display:inline-flex;align-items:center;gap:4px;padding:5px 6px 5px 11px;border-radius:20px;background:var(--panel2);font-size:13px}
 .chip button{border:0;background:none;color:var(--muted);font-size:16px;width:26px;height:26px}
+.chip .chip-name{width:auto;height:auto;font-size:13px;color:inherit;padding:0;text-align:left}
+.source-edit{display:grid;grid-template-columns:1fr 130px;gap:10px;margin-bottom:6px}
+.source-edit label{margin:0}
 .inline-form{display:flex;gap:8px}
 .inline-form input{flex:1}
 .footer-note{text-align:center;font-size:12px;margin:20px 0}
