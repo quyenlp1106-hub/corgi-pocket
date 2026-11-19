@@ -290,13 +290,15 @@ function go(p) { page = p; history.replaceState(null, '', '#' + p); render(); wi
 function confirmAction(title, text, label = 'Xác nhận', pick = null) {
   const d = $('#confirmDialog'); $('#confirmTitle').textContent = title; $('#confirmText').textContent = text; $('#confirmOK').textContent = label; d.returnValue = '';
   $('#confirmPick').hidden = !pick;
+  pickNone = pick?.none || '';
   if (pick) { $('#confirmPickLabel').textContent = pick.label; d.querySelector('[name=pick]').value = pick.value; drawConfirmChips(); }
   d.showModal();
   return new Promise(resolve => d.addEventListener('close', () => resolve(d.returnValue === 'ok' ? (pick ? d.querySelector('[name=pick]').value || null : true) : false), {once: true}));
 }
+let pickNone = '';
 function drawConfirmChips() {
   const v = $('#confirmDialog [name=pick]').value;
-  $('#confirmChips').innerHTML = chipHTML('pick', db.sources.filter(x => !isCredit(x.kind)).map(x => [x.id, sourceLabel(x)]), v);
+  $('#confirmChips').innerHTML = chipHTML('pick', [...db.sources.filter(x => !isCredit(x.kind)).map(x => [x.id, sourceLabel(x)]), ...(pickNone ? [['', pickNone]] : [])], v);
 }
 function lastVia() {
   const used = [...db.fixed.filter(f => f.paidFrom).map(f => [f.paidAt || f.paidDate, f.paidFrom]), ...[...db.settlements, ...db.reimbursements].filter(x => x.via).map(x => [x.at, x.via])].sort((a, b) => b[0].localeCompare(a[0]));
@@ -621,7 +623,7 @@ document.addEventListener('click', async ev => {
     const f = db.fixed.find(r => r.id === b.dataset.paid);
     if (!f.paid && !f.amount) { toast('Nhập số tiền trước khi đánh dấu đã trả.'); return openFixed('fixed', f.id); }
     let via = null;
-    if (!f.paid) { via = await confirmAction('Đã trả khoản này?', `${f.name} · ${fmt(f.amount)}`, 'Đã trả', {label: 'Trả bằng', value: lastVia()}); if (via === false) return; }
+    if (!f.paid) { via = await confirmAction('Đã trả khoản này?', `${f.name} · ${fmt(f.amount)}`, 'Đã trả', {label: 'Trả bằng', value: lastVia(), none: '🧾 Không trừ tiền (đã có trong sao kê)'}); if (via === false) return; }
     if (mutate(d => { const r = d.fixed.find(x => x.id === f.id); r.paid = !r.paid; r.paidDate = r.paid ? today() : null; r.paidAt = r.paid ? new Date().toISOString() : null; r.paidFrom = r.paid ? via : null; })) { render(); toast(f.paid ? 'Đã bỏ đánh dấu.' : 'Đã trả ✓'); }
     return;
   }
