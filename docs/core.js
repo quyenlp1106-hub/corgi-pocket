@@ -1,5 +1,5 @@
 // Corgi Pocket — phần tính toán thuần (không đụng giao diện), có test trong tests/core.test.mjs
-export const VERSION = 3;
+export const VERSION = 4;
 export const MAX = 1_000_000_000_000;
 const exactHalf = n => Number.isSafeInteger(n * 2);
 
@@ -92,6 +92,14 @@ export function reimburse(db, ids, id, at) {
     expenses: db.expenses.map(e => ids.includes(e.id) ? {...e, reimburseId: id} : e),
     reimbursements: [{id, at, amount, entryIds: chosen.map(e => e.id)}, ...db.reimbursements]};
 }
+// Kết sổ phần công ty: coi như công ty đã hoàn đủ mọi khoản đang chờ. Không cộng vào nguồn nào (via null), lịch sử giữ nguyên.
+export function closeCompany(db, id, at) {
+  const ids = companyPending(db.expenses).map(e => e.id);
+  if (!ids.length) return db;
+  const next = reimburse(db, ids, id, at);
+  Object.assign(next.reimbursements[0], {via: null, closeOut: true});
+  return next;
+}
 export function undoReimburse(db, id) {
   return {...db, expenses: db.expenses.map(e => e.reimburseId === id ? {...e, reimburseId: null} : e), reimbursements: db.reimbursements.filter(r => r.id !== id)};
 }
@@ -135,6 +143,7 @@ function defaultSources() {
 export function migrateDB(d) {
   if (d && d.version === 1) d = {...d, version: 2, sources: defaultSources(), incomes: [], incomeCategories: freshDB().incomeCategories};
   if (d && d.version === 2) d = {...d, version: 3, adjustments: [], lastNotified: null};
+  if (d && d.version === 3) d = {...closeCompany(d, 'ket-so-cong-ty', new Date().toISOString()), version: 4};
   return validateDB(d);
 }
 
@@ -145,6 +154,8 @@ export const isConfigured = s => Number.isSafeInteger(s.opening) && dateValid(s.
 export function cardSourceOf(db, f) {
   return db.sources.find(x => isCredit(x.kind) && ((f.templateId && x.templateId === f.templateId) || x.name.toLowerCase() === f.name.toLowerCase()));
 }
+// Một kỳ cố định đã trả có thể trừ từ 1–3 nguồn (paidSplit). Bản cũ: 1 nguồn paidFrom.
+export const paidParts = f => !f.paid ? [] : Array.isArray(f.paidSplit) ? f.paidSplit : f.paidFrom ? [{sourceId: f.paidFrom, amount: f.amount}] : [];
 export function balance(db, s) {
   if (!isConfigured(s)) return null;
   // Khoản ghi sau lúc chị nhập số dư mới được cộng/trừ (cùng ngày thì so giờ nhập)
@@ -158,7 +169,7 @@ export function balance(db, s) {
   }
   for (const i of db.incomes) if (i.sourceId === s.id && from(i.date, i.createdAt)) n += i.amount;
   for (const e of db.expenses) if (e.kind !== 'opening' && e.payer === 'a' && e.sourceId === s.id && from(e.date, e.createdAt)) n -= e.amount;
-  for (const f of db.fixed) if (f.paid && f.paidFrom === s.id && from(f.paidDate, f.paidAt)) n -= f.amount;
+  for (const f of db.fixed) if (f.paid && from(f.paidDate, f.paidAt)) for (const p of paidParts(f)) if (p.sourceId === s.id) n -= p.amount;
   for (const x of db.settlements) if (x.via === s.id && from(localDate(x.at), x.at)) n += x.net;
   for (const x of db.reimbursements) if (x.via === s.id && from(localDate(x.at), x.at)) n += x.amount;
   return n + adj;
@@ -226,7 +237,7 @@ export function cashflow(db, month) {
   const r = {income: 0, incomeBy: {}, fromNhi: 0, fromCompany: 0, toNhi: 0, spend: 0, spendBy: {}, credit: 0, immediate: 0, fixedPaid: 0, fixedBy: {}, cashIn: 0, cashOut: 0, net: 0};
   for (const i of db.incomes) if (inMonth(i.date)) { r.income += i.amount; r.incomeBy[i.category] = (r.incomeBy[i.category] || 0) + i.amount; }
   for (const s of db.settlements) if (inMonth(localDate(s.at))) { if (s.net > 0) r.fromNhi += s.net; else r.toNhi -= s.net; }
-  for (const x of db.reimbursements) if (inMonth(localDate(x.at))) r.fromCompany += x.amount;
+  for (const x of db.reimbursements) if (!x.closeOut && inMonth(localDate(x.at))) r.fromCompany += x.amount;
   for (const e of db.expenses) {
     if (e.kind === 'opening' || e.payer !== 'a' || !inMonth(e.date)) continue;
     const key = e.sourceId && src(e.sourceId) ? e.sourceId : '';
@@ -284,7 +295,8 @@ export function validateDB(d) {
     if (rows.length !== r.entryIds.length || rows.some(e => e.reimburseId !== r.id) || rows.reduce((s, e) => s + e.amount, 0) !== r.amount) fail();
   }
   for (const t of d.templates) if (!str(t.id) || !FIXED_TYPES[t.type] || !str(t.name) || !integer(t.amount) || !Number.isInteger(t.day) || t.day < 1 || t.day > 31 || !/^\d{4}-\d{2}$/.test(t.start) || !(t.principal === undefined || t.principal === null || integer(t.principal)) || !opt(t.note)) fail();
-  for (const f of d.fixed) if (!str(f.id) || !FIXED_TYPES[f.type] || !str(f.name) || !integer(f.amount) || !dateValid(f.due) || typeof f.paid !== 'boolean' || (f.paid && !dateValid(f.paidDate)) || !opt(f.note) || !(f.paidFrom == null || typeof f.paidFrom === 'string')) fail();
+  for (const f of d.fixed) if (!str(f.id) || !FIXED_TYPES[f.type] || !str(f.name) || !integer(f.amount) || !dateValid(f.due) || typeof f.paid !== 'boolean' || (f.paid && !dateValid(f.paidDate)) || !opt(f.note) || !(f.paidFrom == null || typeof f.paidFrom === 'string') ||
+    !(f.paidSplit == null || (Array.isArray(f.paidSplit) && f.paidSplit.length <= 5 && f.paidSplit.every(p => str(p.sourceId) && integer(p.amount)) && f.paidSplit.reduce((t, p) => t + p.amount, 0) <= f.amount))) fail();
   for (const x of [...d.settlements, ...d.reimbursements]) if (!(x.via == null || typeof x.via === 'string')) fail();
   if (d.skips.some(x => typeof x !== 'string')) fail();
   totals(d.expenses);
@@ -313,14 +325,14 @@ export function mergeImport(db, pack, makeId, nowIso) {
 export function mergeSource(db, fromId, toId) {
   if (fromId === toId) return;
   for (const x of [...db.expenses, ...db.incomes, ...db.adjustments]) if (x.sourceId === fromId) x.sourceId = toId;
-  for (const f of db.fixed) if (f.paidFrom === fromId) f.paidFrom = toId;
+  for (const f of db.fixed) { if (f.paidFrom === fromId) f.paidFrom = toId; for (const p of f.paidSplit || []) if (p.sourceId === fromId) p.sourceId = toId; }
   for (const x of [...db.settlements, ...db.reimbursements]) if (x.via === fromId) x.via = toId;
   const from = db.sources.find(x => x.id === fromId), to = db.sources.find(x => x.id === toId);
   if (from?.templateId && !to.templateId) to.templateId = from.templateId;
   db.sources = db.sources.filter(x => x.id !== fromId);
 }
 export const sourceInUse = (db, id) => db.expenses.some(e => e.sourceId === id) || db.incomes.some(i => i.sourceId === id) || db.adjustments.some(a => a.sourceId === id)
-  || db.fixed.some(f => f.paidFrom === id) || [...db.settlements, ...db.reimbursements].some(x => x.via === id);
+  || db.fixed.some(f => f.paidFrom === id || (f.paidSplit || []).some(p => p.sourceId === id)) || [...db.settlements, ...db.reimbursements].some(x => x.via === id);
 
 // Gói nhập bản 2: dọn nguồn tiền (đổi tên, gộp, chốt số dư), xoá khoản trùng, thêm/cập nhật khoản từ sao kê.
 // Khoản đã có: chỉ cập nhật nếu còn “cần xem” hoặc “Chưa phân loại”; khoản chị đã phân loại thì giữ nguyên.

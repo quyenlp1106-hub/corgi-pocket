@@ -191,7 +191,7 @@ textarea{font-size:13px;line-height:1.5}
 
 .fab{position:fixed;right:18px;bottom:calc(84px + var(--safe-b));z-index:6;width:58px;height:58px;border-radius:50%;border:0;background:var(--red);color:#fff;font-size:28px;box-shadow:0 10px 28px rgba(225,29,46,.45)}
 .fab:active{transform:scale(.95)}
-.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:5;display:grid;grid-template-columns:repeat(5,1fr);padding:6px 6px calc(6px + var(--safe-b));background:rgba(16,16,18,.94);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--border)}
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:5;display:grid;grid-template-columns:repeat(4,1fr);padding:6px 6px calc(6px + var(--safe-b));background:rgba(16,16,18,.94);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--border)}
 .tabbar button{border:0;background:none;display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 0;color:var(--muted);border-radius:12px}
 .tabbar button span{font-size:19px;line-height:1.1}
 .tabbar button small{font-size:10.5px;font-weight:600}
@@ -243,3 +243,38 @@ textarea{font-size:13px;line-height:1.5}
 .due-row .paid-toggle{margin-top:0}
 .tag.red-tag{color:#ff8a94;border-color:#5a1720}
 .hint.orange{color:var(--orange)}
+
+/* ---- trang tổng quan ---- */
+.money-card{display:grid;gap:10px}
+.mc-block{background:var(--panel2);border-radius:14px;padding:12px;display:grid;gap:6px}
+.mc-title{font-size:13px;font-weight:700;color:var(--muted)}
+.mc-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mc-pair>div{display:grid;gap:2px;min-width:0}
+.mc-pair span{font-size:11.5px;color:var(--muted)}
+.mc-pair b{font-size:17px;overflow-wrap:anywhere}
+.mc-big{font-size:24px}
+.mc-block small{font-size:12px;color:var(--muted)}
+.mc-block.spend{border:1px solid #1d4a33}
+.mc-block.spend.neg{border-color:#5a1720}
+.mc-block.spend .mc-pair b{color:var(--green)}
+.mc-block.spend.neg .mc-pair div:first-child b{color:var(--red2)}
+.quick-add{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+details.debt-list>summary,details.panel>summary{display:flex;align-items:center;justify-content:space-between;gap:8px}
+details.panel>summary h2{margin:0}
+.debt-item{border-top:1px solid var(--border)}
+.debt-item:first-of-type{border-top:0}
+.debt-item>summary{list-style:none;display:flex;align-items:center;gap:10px;padding:11px 0;cursor:pointer}
+.debt-item>summary::-webkit-details-marker{display:none}
+.debt-name{flex:1;min-width:0;display:grid;gap:2px;font-weight:600}
+.debt-name small{font-size:12px;font-weight:400;color:var(--muted)}
+.debt-item .chev{font-style:normal;color:var(--muted);font-size:12px;transition:transform .15s}
+.debt-item[open] .chev{transform:rotate(180deg)}
+.debt-more{padding:0 0 12px 38px;display:grid;gap:6px}
+.debt-item.paid>summary{opacity:.6}
+.debt-item.overdue>summary b{color:var(--red2)}
+.day.late{border-color:var(--red2)}
+.day-done{font-size:11px;color:var(--green);font-weight:700}
+.day-due{margin-top:12px}
+.pay-row{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 36px;gap:8px;margin-bottom:8px}
+.pay-row [hidden]{display:none}
+#payAddRow{margin-bottom:12px}

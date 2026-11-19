@@ -23,9 +23,8 @@
 
 <button id="fab" class="fab" aria-label="Thêm khoản chi">＋</button>
 <nav class="tabbar" aria-label="Điều hướng">
-  <button data-page="home"><span>▦</span><small>Lịch</small></button>
+  <button data-page="home"><span>⌂</span><small>Tổng quan</small></button>
   <button data-page="nhi"><span>⇄</span><small id="tabNhi">Nhi</small></button>
-  <button data-page="company"><span>↺</span><small>Hoàn ứng</small></button>
   <button data-page="fixed"><span>▤</span><small>Cố định</small></button>
   <button data-page="flow"><span>⇅</span><small>Dòng tiền</small></button>
 </nav>
@@ -70,7 +69,7 @@
   <input type="hidden" name="sourceId" value="">
   <label>Ngày<input name="date" required type="date"></label>
   <label><span>Ghi chú <span class="muted">(không bắt buộc)</span></span><input name="note" maxlength="300" placeholder="Ví dụ: hạn trả vay 31/12" autocomplete="off"></label>
-  <p class="hint">Tiền em gái trả chị và tiền công ty hoàn ứng app tự tính, không cần ghi ở đây.</p>
+  <p class="hint">Tiền Nhi trả chị app tự tính khi chốt sổ, không cần ghi ở đây.</p>
   <div class="sheet-foot"><button type="button" data-close="incomeDialog" class="btn ghost">Để sau</button><button class="btn primary green-btn" type="submit">Lưu khoản thu</button></div>
 </form></dialog>
 
@@ -98,6 +97,19 @@
   <label id="sourceLimitField"><span>Hạn mức <span class="muted">(để biết còn quẹt được bao nhiêu)</span></span><input name="limit" inputmode="decimal" placeholder="Ví dụ: 50tr" autocomplete="off"></label>
   <p class="hint" id="sourceHint"></p>
   <div class="sheet-foot"><button type="button" data-close="sourceDialog" class="btn ghost">Để sau</button><button class="btn primary" type="submit">Lưu</button></div>
+</form></dialog>
+
+<dialog id="payDialog" class="sheet"><form id="payForm">
+  <div class="sheet-head"><h2 id="payTitle">Trả khoản cố định</h2><button type="button" data-close="payDialog" class="icon-btn" aria-label="Đóng">×</button></div>
+  <input type="hidden" name="fid">
+  <p id="payInfo" class="hint"></p>
+  <div class="form-row"><label>Số tiền thực trả<input name="amount" inputmode="decimal" placeholder="Ví dụ: 3,2tr" autocomplete="off"></label><label>Ngày trả<input name="date" type="date" required></label></div>
+  <div class="field-label">Trừ từ nguồn nào?</div>
+  <div id="payRows"></div>
+  <button type="button" id="payAddRow" class="btn ghost small">＋ Thêm nguồn</button>
+  <label class="check"><input type="checkbox" name="none"> 🧾 Không trừ tiền (đã có trong sao kê)</label>
+  <div id="paySum" class="split-preview" aria-live="polite"></div>
+  <div class="sheet-foot"><button type="button" data-close="payDialog" class="btn ghost">Để sau</button><button type="submit" class="btn primary">Đã trả</button></div>
 </form></dialog>
 
 <dialog id="confirmDialog" class="sheet"><form method="dialog">
