@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {moneyInput, shares, debt, totals, outstanding, companyPending, closePeriod, undoPeriod, reimburse, undoReimburse, generateFixed, debtRemaining, dueDate, freshDB, validateDB, migrateDB, cashflow, balance, wallet, upcoming, buildICS, mergeImport, applyPack, mergeSource} from '../docs/core.js';
+import {moneyInput, shares, debt, totals, outstanding, companyPending, closePeriod, undoPeriod, reimburse, undoReimburse, generateFixed, debtRemaining, dueDate, freshDB, validateDB, migrateDB, cashflow, balance, wallet, upcoming, buildICS, mergeImport, applyPack, mergeSource, syncFixedShare} from '../docs/core.js';
 
 let n = 0;
 const id = () => 'id' + (++n);
@@ -160,7 +160,7 @@ test('ví: số dư âm/dương, không trừ trùng khoản ghi trước lúc n
 });
 
 test('lịch nhắc .ics cho khoản lặp lại và khoản lẻ', () => {
-  const db = freshDB();
+  let db = freshDB();
   db.templates = [{id: 't1', type: 'debt', name: 'Vay xe', amount: 3000000, day: 25, start: '2026-10', principal: 9000000}];
   db.fixed = [{id: 'f9', type: 'bill', name: 'Học phí', amount: 2000000, due: '2026-11-15', paid: false, paidDate: null}];
   const ics = buildICS(db, '2026-10-30');
@@ -249,4 +249,26 @@ test('kết sổ công ty & trả cố định từ nhiều nguồn', () => {
   assert.equal(balance(db, s2), 700000);
   db.fixed[0].paidSplit[1].amount = 400000;
   assert.throws(() => validateDB(db));
+});
+
+test('khoản cố định chia đôi ghi sang sổ người kia', () => {
+  let db = freshDB();
+  db.templates = [{id: 't1', type: 'bill', name: 'Tiền nhà', amount: 4000000, day: 5, start: '2026-10', note: '', split: 'half'}];
+  db = generateFixed(db, '2026-10', id);
+  assert.equal(db.fixed[0].split, 'half');
+  const f = db.fixed[0];
+  Object.assign(f, {paid: true, paidDate: '2026-10-05', amount: 4200000});
+  assert.equal(syncFixedShare(db, f.id, id), true);
+  validateDB(db);
+  assert.equal(totals(outstanding(db.expenses)).net, 2100000);
+  assert.equal(cashflow(db, '2026-10').fixedPaid, 4200000);
+  assert.equal(cashflow(db, '2026-10').spend, 0);
+  f.split = 'a'; syncFixedShare(db, f.id, id);
+  assert.equal(db.expenses.length, 0);
+  f.split = 'half'; syncFixedShare(db, f.id, id);
+  const settled = closePeriod(db, db.expenses.map(e => e.id), 'k1', '2026-10-31T00:00:00Z', 'Kỳ 1');
+  const linked = settled.expenses[0]; assert.ok(linked.settlementId);
+  settled.fixed[0].paid = false;
+  assert.equal(syncFixedShare(settled, f.id, id), false);
+  assert.equal(settled.expenses.length, 1);
 });
