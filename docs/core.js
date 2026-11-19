@@ -123,7 +123,7 @@ export function generateFixed(db, month, makeId) {
     .filter(t => !db.fixed.some(f => f.templateId === t.id && f.due.slice(0, 7) === month))
     .filter(t => !db.skips.includes(t.id + ':' + month))
     .filter(t => t.type !== 'debt' || debtRemaining(db, t) !== 0)
-    .map(t => ({id: makeId(), templateId: t.id, type: t.type, name: t.name, amount: t.type === 'debt' && t.principal ? Math.min(t.amount, debtRemaining(db, t)) : t.amount, due: dueDate(month, t.day), paid: false, paidDate: null, note: t.note || ''}));
+    .map(t => ({id: makeId(), templateId: t.id, type: t.type, name: t.name, amount: t.type === 'debt' && t.principal ? Math.min(t.amount, debtRemaining(db, t)) : t.amount, due: dueDate(month, t.day), paid: false, paidDate: null, note: t.note || '', split: t.split === 'half' ? 'half' : 'a'}));
   return added.length ? {...db, fixed: [...db.fixed, ...added]} : db;
 }
 
@@ -155,6 +155,17 @@ export function cardSourceOf(db, f) {
   return db.sources.find(x => isCredit(x.kind) && ((f.templateId && x.templateId === f.templateId) || x.name.toLowerCase() === f.name.toLowerCase()));
 }
 // Một kỳ cố định đã trả có thể trừ từ 1–3 nguồn (paidSplit). Bản cũ: 1 nguồn paidFrom.
+// Khoản cố định chia đôi: khi đã trả thì có 1 dòng chi gắn kèm (fixedId) để tính nợ với Nhi.
+// Dòng đã chốt sổ thì giữ nguyên. Trả về false nếu dòng gắn kèm đã chốt mà khoản cố định đổi.
+export function syncFixedShare(db, fixedId, makeId) {
+  const f = db.fixed.find(x => x.id === fixedId), linked = db.expenses.find(e => e.fixedId === fixedId);
+  const want = f && f.paid && f.split === 'half' && f.amount > 0;
+  if (linked?.settlementId) return !!want && linked.amount === f.amount;
+  if (!want) { if (linked) db.expenses = db.expenses.filter(e => e !== linked); return true; }
+  const row = {description: f.name, amount: f.amount, split: 'half', custom: 0, payer: 'a', category: FIXED_TYPES[f.type], date: f.paidDate, note: 'Từ khoản cố định', sourceId: null, fixedId};
+  if (linked) Object.assign(linked, row); else db.expenses.push({id: makeId(), settlementId: null, reimburseId: null, createdAt: new Date().toISOString(), ...row});
+  return true;
+}
 export const paidParts = f => !f.paid ? [] : Array.isArray(f.paidSplit) ? f.paidSplit : f.paidFrom ? [{sourceId: f.paidFrom, amount: f.amount}] : [];
 export function balance(db, s) {
   if (!isConfigured(s)) return null;
@@ -239,7 +250,7 @@ export function cashflow(db, month) {
   for (const s of db.settlements) if (inMonth(localDate(s.at))) { if (s.net > 0) r.fromNhi += s.net; else r.toNhi -= s.net; }
   for (const x of db.reimbursements) if (!x.closeOut && inMonth(localDate(x.at))) r.fromCompany += x.amount;
   for (const e of db.expenses) {
-    if (e.kind === 'opening' || e.payer !== 'a' || !inMonth(e.date)) continue;
+    if (e.kind === 'opening' || e.fixedId || e.payer !== 'a' || !inMonth(e.date)) continue; // khoản chia đôi từ cố định đã tính ở fixedPaid
     const key = e.sourceId && src(e.sourceId) ? e.sourceId : '';
     r.spend += e.amount; r.spendBy[key] = (r.spendBy[key] || 0) + e.amount;
     if (isCredit(src(e.sourceId)?.kind)) r.credit += e.amount; else r.immediate += e.amount;
@@ -280,6 +291,7 @@ export function validateDB(d) {
       try { shares(e.amount, e.split, e.custom); } catch { fail(); }
       if (e.split === 'company' && (e.payer !== 'a' || e.settlementId)) fail();
       if (e.sourceId != null && typeof e.sourceId !== 'string') fail();
+      if (e.fixedId != null && (typeof e.fixedId !== 'string' || e.sourceId)) fail();
     }
     if (e.settlementId && !d.settlements.some(s => s.id === e.settlementId && s.entryIds.includes(e.id))) fail();
     if (e.reimburseId && !d.reimbursements.some(r => r.id === e.reimburseId && r.entryIds.includes(e.id))) fail();
@@ -294,8 +306,8 @@ export function validateDB(d) {
     const rows = d.expenses.filter(e => r.entryIds.includes(e.id));
     if (rows.length !== r.entryIds.length || rows.some(e => e.reimburseId !== r.id) || rows.reduce((s, e) => s + e.amount, 0) !== r.amount) fail();
   }
-  for (const t of d.templates) if (!str(t.id) || !FIXED_TYPES[t.type] || !str(t.name) || !integer(t.amount) || !Number.isInteger(t.day) || t.day < 1 || t.day > 31 || !/^\d{4}-\d{2}$/.test(t.start) || !(t.principal === undefined || t.principal === null || integer(t.principal)) || !opt(t.note)) fail();
-  for (const f of d.fixed) if (!str(f.id) || !FIXED_TYPES[f.type] || !str(f.name) || !integer(f.amount) || !dateValid(f.due) || typeof f.paid !== 'boolean' || (f.paid && !dateValid(f.paidDate)) || !opt(f.note) || !(f.paidFrom == null || typeof f.paidFrom === 'string') ||
+  for (const t of d.templates) if (!str(t.id) || !FIXED_TYPES[t.type] || !str(t.name) || !integer(t.amount) || !Number.isInteger(t.day) || t.day < 1 || t.day > 31 || !/^\d{4}-\d{2}$/.test(t.start) || !(t.principal === undefined || t.principal === null || integer(t.principal)) || !opt(t.note) || ![undefined, null, 'a', 'half'].includes(t.split)) fail();
+  for (const f of d.fixed) if (!str(f.id) || !FIXED_TYPES[f.type] || !str(f.name) || !integer(f.amount) || !dateValid(f.due) || typeof f.paid !== 'boolean' || (f.paid && !dateValid(f.paidDate)) || !opt(f.note) || ![undefined, null, 'a', 'half'].includes(f.split) || !(f.paidFrom == null || typeof f.paidFrom === 'string') ||
     !(f.paidSplit == null || (Array.isArray(f.paidSplit) && f.paidSplit.length <= 5 && f.paidSplit.every(p => str(p.sourceId) && integer(p.amount)) && f.paidSplit.reduce((t, p) => t + p.amount, 0) <= f.amount))) fail();
   for (const x of [...d.settlements, ...d.reimbursements]) if (!(x.via == null || typeof x.via === 'string')) fail();
   if (d.skips.some(x => typeof x !== 'string')) fail();

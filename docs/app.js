@@ -1,4 +1,4 @@
-import {moneyInput, formatMoney, shares, debt, totals, monthOf, outstanding, closePeriod, undoPeriod, generateFixed, debtRemaining, dueDate, freshDB, validateDB, migrateDB, cashflow, wallet, balance, upcoming, buildICS, isConfigured, mergeImport, applyPack, sourceInUse, dateValid, csvCell, paidParts, FIXED_TYPES, SOURCE_KINDS, isCredit} from './core.js';
+import {moneyInput, formatMoney, shares, debt, totals, monthOf, outstanding, closePeriod, undoPeriod, generateFixed, debtRemaining, dueDate, freshDB, validateDB, migrateDB, cashflow, wallet, balance, upcoming, buildICS, isConfigured, mergeImport, applyPack, sourceInUse, dateValid, csvCell, paidParts, syncFixedShare, FIXED_TYPES, SOURCE_KINDS, isCredit} from './core.js';
 
 const KEY = 'corgi-pocket-v1:' + new URL('./', location.href).pathname;
 const $ = (s, r = document) => r.querySelector(s);
@@ -56,13 +56,13 @@ function head(title, sub, button = '') { return `<div class="page-head"><div><h1
 function monthNav(m, type) { return `<div class="month-nav"><button class="icon-btn" data-shift="${type}:-1" aria-label="Tháng trước">‹</button><strong>${monthName(m)}</strong><button class="icon-btn" data-shift="${type}:1" aria-label="Tháng sau">›</button></div>`; }
 
 function expenseHTML(e) {
-  const locked = !!(e.settlementId || e.reimburseId), company = e.split === 'company';
+  const locked = !!(e.settlementId || e.reimburseId || e.fixedId), company = e.split === 'company';
   const status = company ? (e.reimburseId ? '<span class="tag green">✓ Đã hoàn</span>' : '<span class="tag orange">Chờ hoàn</span>') : e.settlementId ? '<span class="tag green">✓ Đã chốt</span>' : '';
   const amount = e.kind === 'opening' ? Math.abs(e.balance) : e.amount;
   const meta = e.kind === 'opening' ? owedText(e.balance) : `${esc(N()[e.payer])} trả${e.payer === 'a' && e.sourceId ? ' · ' + esc(sourceName(e.sourceId)) : ''} · ${esc(e.category)}`;
   return `<article class="expense ${company ? 'is-company' : ''}"><span class="cat-icon">${e.kind === 'opening' ? '↶' : company ? '💼' : catIcon(e.category)}</span>
     <div class="expense-body"><div class="expense-name">${esc(e.description)}</div><div class="expense-meta">${meta}</div>${e.note ? `<div class="expense-note">${esc(e.note)}</div>` : ''}
-    <div class="expense-tags"><span class="tag ${company ? 'orange' : ''}">${esc(splitLabel(e))}</span>${status}${e.review ? reviewTag(e.id) : ''}</div></div>
+    <div class="expense-tags"><span class="tag ${company ? 'orange' : ''}">${esc(splitLabel(e))}</span>${e.fixedId ? '<span class="tag">↻ Khoản cố định</span>' : ''}${status}${e.review ? reviewTag(e.id) : ''}</div></div>
     <div class="expense-side"><span class="expense-amount">${fmt(amount)}</span>${locked ? '' : `<div>${e.kind !== 'opening' ? `<button class="text-btn" data-edit="${e.id}">Sửa</button>` : ''}<button class="text-btn danger" data-delete="${e.id}">Xoá</button></div>`}</div></article>`;
 }
 
@@ -98,13 +98,14 @@ function walletHTML(full) {
 
 // ---------- trang Tổng quan ----------
 function upcomingNextMonth() { return addDays(today(), 7).slice(0, 7) !== today().slice(0, 7); }
+const halfTag = f => f.split === 'half' ? ` <span class="tag">½ chia ${esc(N().b)}</span>` : '';
 const partsText = f => paidParts(f).map(p => `${sourceName(p.sourceId)} ${compact(p.amount)}`).join(' + ');
 function debtItem(f) {
   const t = db.templates.find(x => x.id === f.templateId), remaining = t && t.type === 'debt' ? debtRemaining(db, t) : null, overdue = !f.paid && f.due < today();
   const when = f.paid ? `Đã trả ${shortDate(f.paidDate)}` : overdue ? `<b class="red">Quá hạn · ${shortDate(f.due)}</b>` : f.due === today() ? '<b class="red">Hôm nay</b>' : `Hạn ${shortDate(f.due)}`;
   return `<details class="debt-item ${f.paid ? 'paid' : ''} ${overdue ? 'overdue' : ''}"><summary><button class="paid-toggle ${f.paid ? 'on' : ''}" data-paid="${f.id}" aria-label="${f.paid ? 'Bỏ đánh dấu' : 'Trả'} ${esc(f.name)}">${f.paid ? '✓' : ''}</button>
-    <span class="debt-name">${TYPE_ICON[f.type]} ${esc(f.name)}<small>${when}</small></span><b>${f.amount ? fmt(f.amount) : '<span class="orange">Chưa có số</span>'}</b><i class="chev">▾</i></summary>
-    <div class="debt-more">${line('Loại', FIXED_TYPES[f.type])}${f.paid ? line('Trừ từ', esc(partsText(f) || 'Không trừ tiền')) : line('Hạn trả', niceDate(f.due))}
+    <span class="debt-name"><span>${TYPE_ICON[f.type]} ${esc(f.name)}${halfTag(f)}</span><small>${when}</small></span><b>${f.amount ? fmt(f.amount) : '<span class="orange">Chưa có số</span>'}</b><i class="chev">▾</i></summary>
+    <div class="debt-more">${line('Loại', FIXED_TYPES[f.type])}${line('Của ai', f.split === 'half' ? `Chia đôi · ${esc(N().b)} chịu ${fmt(Math.round(f.amount / 2))}` : 'Riêng ' + esc(N().a.toLowerCase()))}${f.paid ? line('Trừ từ', esc(partsText(f) || 'Không trừ tiền')) : line('Hạn trả', niceDate(f.due))}
       ${remaining !== null ? line('Dư nợ còn lại', fmt(remaining)) : ''}${t ? line('Lặp lại', `ngày ${t.day} hằng tháng${t.amount ? ' · ' + fmt(t.amount) : ''}`) : ''}
       ${f.type === 'card' ? cardSwipe(f) : ''}${f.note ? `<div class="expense-note">${esc(f.note)}</div>` : ''}
       <div class="btn-row">${f.paid ? '' : `<button class="btn primary small" data-paid="${f.id}">✓ Trả khoản này</button>`}<button class="btn ghost small" data-edit-fixed="${f.id}">Sửa</button></div></div></details>`;
@@ -200,7 +201,7 @@ function cardSwipe(f) {
 function fixedRow(f) {
   const t = db.templates.find(x => x.id === f.templateId), remaining = t && t.type === 'debt' ? debtRemaining(db, t) : null, overdue = !f.paid && f.due < today();
   return `<article class="fixed-row ${f.paid ? 'paid' : ''}"><button class="paid-toggle ${f.paid ? 'on' : ''}" data-paid="${f.id}" aria-label="${f.paid ? 'Bỏ đánh dấu' : 'Đánh dấu'} đã trả ${esc(f.name)}" aria-pressed="${f.paid}">${f.paid ? '✓' : ''}</button>
-    <div class="expense-body"><div class="expense-name">${TYPE_ICON[f.type]} ${esc(f.name)}${t ? ' <span class="muted small">↻</span>' : ''}</div>
+    <div class="expense-body"><div class="expense-name">${TYPE_ICON[f.type]} ${esc(f.name)}${t ? ' <span class="muted small">↻</span>' : ''}${halfTag(f)}</div>
     ${f.type === 'card' ? cardSwipe(f) : ''}<div class="expense-meta ${overdue ? 'red' : ''}">${f.paid ? `Đã trả ${shortDate(f.paidDate)}${paidParts(f).length ? ' · ' + esc(partsText(f)) : ''}` : `Hạn ${shortDate(f.due)}${overdue ? ' · <b>quá hạn</b>' : ''}`}${remaining !== null ? ` · còn nợ ${fmt(remaining)}` : ''}</div>${f.note ? `<div class="expense-note">${esc(f.note)}</div>` : ''}</div>
     <div class="expense-side"><span class="expense-amount">${f.amount ? fmt(f.amount) : '<span class="orange">Nhập số</span>'}</span><div><button class="text-btn" data-edit-fixed="${f.id}">Sửa</button><button class="text-btn danger" data-delete-fixed="${f.id}">Xoá</button></div></div></article>`;
 }
@@ -337,7 +338,7 @@ function previewSplit() {
 }
 function openExpense(id, preset) {
   const e = db.expenses.find(r => r.id === id);
-  if (e && (e.settlementId || e.reimburseId)) return;
+  if (e && (e.settlementId || e.reimburseId || e.fixedId)) return;
   const f = $('#expenseForm'); f.reset(); const x = f.elements;
   x.id.value = e?.id || ''; x.description.value = e?.description || ''; x.amount.value = e?.amount ?? ''; x.date.value = e?.date || (page === 'home' ? selected : today());
   x.category.innerHTML = optionHTML([...new Set([...db.categories, ...(e ? [e.category] : [])])], e?.category);
@@ -469,11 +470,12 @@ function drawPay() {
   $('#payRows').hidden = none; $('#payAddRow').hidden = none || n >= 3;
   $$('#payRows [data-pay-del]').forEach(b => { b.hidden = n <= 1; });
   $$('#payRows input').forEach((i, k) => { i.placeholder = n === 1 ? 'Toàn bộ' : k === n - 1 ? 'Phần còn lại' : 'Số tiền'; });
-  const out = $('#paySum');
-  if (none) { out.textContent = 'Chỉ ghi đã trả, không trừ số dư nguồn nào.'; return; }
+  const out = $('#paySum'), f = db.fixed.find(r => r.id === P().fid.value);
+  const share = f?.split === 'half' && Number.isFinite(amount) && amount ? `<br>½ Ghi vào sổ ${esc(N().b)}: ${esc(N().b)} chịu <b>${fmt(Math.round(amount / 2))}</b>` : '';
+  if (none) { out.innerHTML = 'Chỉ ghi đã trả, không trừ số dư nguồn nào.' + share; return; }
   if (!Number.isFinite(amount) || !amount) { out.textContent = 'Nhập số tiền thực tế trả tháng này.'; return; }
   const sum = parts.reduce((t, p) => t + (Number.isFinite(p.amount) ? p.amount : 0), 0), diff = amount - sum;
-  out.innerHTML = parts.map(p => `${esc(sourceName(p.sourceId))}: <b>${Number.isFinite(p.amount) ? fmt(p.amount) : '?'}</b>`).join('<br>') + `<br>${diff === 0 ? '<span class="green">✓ Đủ ' + fmt(amount) + '</span>' : diff > 0 ? `<span class="orange">Còn thiếu ${fmt(diff)}</span>` : `<span class="red">Dư ${fmt(-diff)}</span>`}`;
+  out.innerHTML = parts.map(p => `${esc(sourceName(p.sourceId))}: <b>${Number.isFinite(p.amount) ? fmt(p.amount) : '?'}</b>`).join('<br>') + `<br>${diff === 0 ? '<span class="green">✓ Đủ ' + fmt(amount) + '</span>' : diff > 0 ? `<span class="orange">Còn thiếu ${fmt(diff)}</span>` : `<span class="red">Dư ${fmt(-diff)}</span>`}` + share;
 }
 function openPay(id) {
   const f = db.fixed.find(r => r.id === id), form = $('#payForm'); form.reset(); const x = form.elements;
@@ -501,7 +503,7 @@ $('#payForm').onsubmit = ev => {
     const sum = parts.reduce((t, p) => t + p.amount, 0);
     if (sum !== amount) { toast(`Các nguồn cộng lại ${fmt(sum)}, chưa khớp ${fmt(amount)}.`); return; }
   }
-  if (mutate(d => { const r = d.fixed.find(y => y.id === f.id); Object.assign(r, {amount, paid: true, paidDate: x.date.value, paidAt: new Date().toISOString(), paidFrom: null, paidSplit: none ? null : parts}); })) {
+  if (mutate(d => { const r = d.fixed.find(y => y.id === f.id); Object.assign(r, {amount, paid: true, paidDate: x.date.value, paidAt: new Date().toISOString(), paidFrom: null, paidSplit: none ? null : parts}); syncFixedShare(d, r.id, uid); })) {
     $('#payDialog').close(); render(); toast(`Đã trả ${f.name} ✓`);
   }
 };
@@ -519,12 +521,13 @@ const F = () => $('#fixedForm').elements;
 function drawFixedChips() {
   const f = F(), type = f.type.value, template = f.mode.value === 'template', isNew = !f.id.value;
   $('#typeChips').innerHTML = chipHTML('type', Object.entries(FIXED_TYPES).map(([k, l]) => [k, TYPE_ICON[k] + ' ' + l]), type);
+  $('#fixedSplitChips').innerHTML = chipHTML('split', [['a', '👤 Riêng ' + esc(N().a.toLowerCase())], ['half', '½ Chia đôi với ' + esc(N().b)]], f.split.value);
   $('#nameLabel').textContent = {card: 'Tên thẻ', debt: 'Tên khoản nợ', bill: 'Tên khoản chi'}[type];
   $('#amountLabel').textContent = type === 'card' ? 'Số sao kê cần trả' : type === 'debt' ? 'Trả mỗi kỳ' : 'Số tiền';
   $('#dueText').textContent = template ? 'Ngày đến hạn (theo tháng)' : 'Hạn thanh toán';
   $('#principalField').hidden = type !== 'debt' || !(template || isNew);
   $('#repeatField').hidden = !isNew;
-  $('#fixedHint').textContent = type === 'card' ? 'Chưa có sao kê thì để trống, nhập sau.' : 'Góc riêng, không cộng vào tiền chia với ' + N().b + '.';
+  $('#fixedHint').textContent = (type === 'card' ? 'Chưa có sao kê thì để trống, nhập sau. ' : '') + (f.split.value === 'half' ? `Khi trả, app ghi 1 khoản chia đôi vào sổ ${N().b}.` : 'Không cộng vào tiền chia với ' + N().b + '.');
 }
 function openFixed(mode, id) {
   const template = mode === 'template', item = (template ? db.templates : db.fixed).find(r => r.id === id);
@@ -532,6 +535,7 @@ function openFixed(mode, id) {
   f.id.value = item?.id || ''; f.mode.value = mode; f.type.value = item?.type || (fixedType === 'all' ? 'card' : fixedType);
   f.name.value = item?.name || ''; f.amount.value = item?.amount || ''; f.note.value = item?.note || '';
   const t = template ? item : db.templates.find(r => r.id === item?.templateId);
+  f.split.value = (item ? item.split : t?.split) === 'half' ? 'half' : 'a';
   f.principal.value = t?.principal || '';
   f.due.value = template ? dueDate(fixedMonth, item.day) : item?.due || (fixedMonth === today().slice(0, 7) ? today() : fixedMonth + '-10');
   $('#fixedTitle').textContent = (item ? 'Sửa ' : 'Thêm ') + (template ? 'khoản lặp lại' : 'khoản cố định');
@@ -545,25 +549,29 @@ $('#fixedForm').onsubmit = ev => {
   if (!name || !Number.isFinite(amount)) { toast('Kiểm tra tên và số tiền nhé.'); return; }
   if (principal !== null && !Number.isFinite(principal)) { toast('Dư nợ chưa đúng định dạng.'); return; }
   if (!dateValid(f.due.value)) { toast('Ngày không hợp lệ'); return; }
-  const day = Number(f.due.value.slice(8)), note = f.note.value.trim();
+  const day = Number(f.due.value.slice(8)), note = f.note.value.trim(), split = f.split.value === 'half' ? 'half' : 'a';
+  let stuck = false;
   const ok = mutate(d => {
     if (template) {
       const t = d.templates.find(r => r.id === f.id.value);
-      Object.assign(t, {type, name, amount, day, note, principal: type === 'debt' ? principal : null});
+      Object.assign(t, {type, name, amount, day, note, split, principal: type === 'debt' ? principal : null});
+      d.fixed.forEach(r => { if (r.templateId === t.id && !r.paid) r.split = split; });
       return;
     }
     const old = d.fixed.find(r => r.id === f.id.value);
     if (old) {
-      Object.assign(old, {type, name, amount, due: f.due.value, note});
+      Object.assign(old, {type, name, amount, due: f.due.value, note, split});
       const t = d.templates.find(r => r.id === old.templateId); if (t && type === 'debt' && principal !== null) t.principal = principal;
+      if (t) { t.split = split; d.fixed.forEach(r => { if (r.templateId === t.id && !r.paid) r.split = split; }); }
+      stuck = !syncFixedShare(d, old.id, uid);
       return;
     }
     let templateId = null;
-    if (f.repeat.checked) { templateId = uid(); d.templates.push({id: templateId, type, name, amount, day, start: f.due.value.slice(0, 7), note, principal: type === 'debt' ? principal : null}); }
-    d.fixed.push({id: uid(), templateId, type, name, amount, due: f.due.value, paid: false, paidDate: null, note});
+    if (f.repeat.checked) { templateId = uid(); d.templates.push({id: templateId, type, name, amount, day, start: f.due.value.slice(0, 7), note, split, principal: type === 'debt' ? principal : null}); }
+    d.fixed.push({id: uid(), templateId, type, name, amount, due: f.due.value, paid: false, paidDate: null, note, split});
   });
   if (ok && type === 'card') linkCardSource(name, f.id.value);
-  if (ok) { if (!template) fixedMonth = f.due.value.slice(0, 7); $('#fixedDialog').close(); render(); toast('Đã lưu 🐶'); }
+  if (ok) { if (!template) fixedMonth = f.due.value.slice(0, 7); $('#fixedDialog').close(); render(); toast(stuck ? `Đã lưu. Phần chia với ${N().b} đã chốt sổ nên giữ số cũ.` : 'Đã lưu 🐶'); }
 };
 
 // Thẻ tín dụng ở Góc cố định ↔ nguồn tiền cùng tên, để chọn khi quẹt thẻ
@@ -656,7 +664,7 @@ document.addEventListener('click', async ev => {
     return;
   }
   if (b.dataset.delete) {
-    const row = db.expenses.find(r => r.id === b.dataset.delete); if (!row || row.settlementId || row.reimburseId) return;
+    const row = db.expenses.find(r => r.id === b.dataset.delete); if (!row || row.settlementId || row.reimburseId || row.fixedId) return;
     if (await confirmAction('Xoá khoản chi?', row.description + ' · ' + fmt(row.amount ?? Math.abs(row.balance)), 'Xoá')) if (mutate(d => { d.expenses = d.expenses.filter(r => r.id !== row.id); })) { render(); toast('Đã xoá.'); }
     return;
   }
@@ -665,16 +673,18 @@ document.addEventListener('click', async ev => {
     ev.preventDefault();
     const f = db.fixed.find(r => r.id === b.dataset.paid);
     if (!f.paid) return openPay(f.id);
+    if (db.expenses.some(e => e.fixedId === f.id && e.settlementId)) { toast(`Phần chia với ${N().b} đã chốt sổ. Mở lại kỳ chốt trước nhé.`); return; }
     if (await confirmAction('Bỏ đánh dấu đã trả?', `${f.name} · ${fmt(f.amount)}\n\nTiền đã trừ ở các nguồn sẽ được cộng lại.`, 'Bỏ đánh dấu'))
-      if (mutate(d => { const r = d.fixed.find(x => x.id === f.id); Object.assign(r, {paid: false, paidDate: null, paidAt: null, paidFrom: null, paidSplit: null}); })) { render(); toast('Đã bỏ đánh dấu.'); }
+      if (mutate(d => { const r = d.fixed.find(x => x.id === f.id); Object.assign(r, {paid: false, paidDate: null, paidAt: null, paidFrom: null, paidSplit: null}); syncFixedShare(d, f.id, uid); })) { render(); toast('Đã bỏ đánh dấu.'); }
     return;
   }
   if (b.dataset.editFixed) return openFixed('fixed', b.dataset.editFixed);
   if (b.dataset.editTemplate) return openFixed('template', b.dataset.editTemplate);
   if (b.dataset.deleteFixed) {
     const f = db.fixed.find(r => r.id === b.dataset.deleteFixed);
+    if (db.expenses.some(e => e.fixedId === f.id && e.settlementId)) { toast(`Phần chia với ${N().b} đã chốt sổ. Mở lại kỳ chốt trước nhé.`); return; }
     if (await confirmAction('Xoá khoản này?', `${f.name} · ${monthName(f.due.slice(0, 7))}.${f.templateId ? '\n\nChỉ xoá tháng này, các tháng khác vẫn tự tạo.' : ''}`, 'Xoá'))
-      if (mutate(d => { d.fixed = d.fixed.filter(r => r.id !== f.id); if (f.templateId) d.skips.push(f.templateId + ':' + f.due.slice(0, 7)); })) { render(); toast('Đã xoá.'); }
+      if (mutate(d => { d.expenses = d.expenses.filter(e => e.fixedId !== f.id); d.fixed = d.fixed.filter(r => r.id !== f.id); if (f.templateId) d.skips.push(f.templateId + ':' + f.due.slice(0, 7)); })) { render(); toast('Đã xoá.'); }
     return;
   }
   if (b.dataset.delTemplate) {

@@ -80,6 +80,9 @@
   <div class="chips-select" id="typeChips" role="radiogroup"></div>
   <label><span id="nameLabel">Tên thẻ</span><input name="name" required maxlength="100" placeholder="Ví dụ: VIB, HSBC, Tiền nhà"></label>
   <div class="form-row"><label><span id="amountLabel">Số tiền cần trả</span><input name="amount" inputmode="decimal" placeholder="Ví dụ: 2,5tr" autocomplete="off"></label><label><span id="dueText">Hạn thanh toán</span><input name="due" type="date" required></label></div>
+  <div class="field-label">Khoản này của ai?</div>
+  <div class="chips-select" id="fixedSplitChips" role="radiogroup"></div>
+  <input type="hidden" name="split" value="a">
   <label id="principalField" hidden><span>Tổng dư nợ còn lại <span class="muted">(để app tự trừ dần)</span></span><input name="principal" inputmode="decimal" placeholder="Ví dụ: 120tr" autocomplete="off"></label>
   <label><span>Ghi chú <span class="muted">(không bắt buộc)</span></span><input name="note" maxlength="300" placeholder="Ví dụ: trả tối thiểu, tài khoản nhận…" autocomplete="off"></label>
   <label class="check" id="repeatField"><input type="checkbox" name="repeat" checked> Lặp lại mỗi tháng (tự tạo khoản tháng sau)</label>
