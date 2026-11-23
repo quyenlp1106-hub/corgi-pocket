@@ -26,7 +26,7 @@ const incomeIcon = c => (INCOME_ICON.find(([re]) => re.test(c)) || [, '＋'])[1]
 
 let db = freshDB(), loadError = false;
 try { const raw = localStorage.getItem(KEY); if (raw) db = migrateDB(JSON.parse(raw)); } catch { loadError = true; }
-let page = 'home', month = today().slice(0, 7), selected = today(), fixedMonth = month, fixedType = 'all', nhiScope = 'all', flowMonth = month;
+let page = 'home', month = today().slice(0, 7), selected = today(), fixedMonth = month, fixedType = 'all', nhiScope = 'all', flowMonth = month, flowTab = 'out', flowRange = 'month', flowFrom = '', flowTo = '', flowLimit = 100;
 
 // ---------- lưu trữ ----------
 let toastTimer;
@@ -43,12 +43,13 @@ function ensureFixed(m) { if (loadError) return; const next = generateFixed(db, 
 const source = id => db.sources.find(x => x.id === id);
 const sourceName = id => id ? (source(id)?.name || 'Nguồn đã xoá') : 'Chưa chọn nguồn';
 const sourceLabel = x => `${SOURCE_ICON[x.kind]} ${x.name}`;
-const N = () => db.names;
+const capName = s => String(s || '').replace(/(^|\s)(\S)/g, (m, sp, c) => sp + c.toUpperCase());
+const N = () => ({...db.names, a: capName(db.names.a), b: capName(db.names.b)});
 function netText(net) { return net > 0 ? `${N().b} cần trả ${N().a}` : net < 0 ? `${N().a} cần trả ${N().b}` : `${N().a} & ${N().b} đã cân bằng`; }
 function owedText(net) { return net > 0 ? `${N().b} nợ ${N().a} ${fmt(net)}` : net < 0 ? `${N().a} nợ ${N().b} ${fmt(-net)}` : 'Không phát sinh nợ'; }
 function splitLabel(e) {
   if (e.kind === 'opening') return 'Nợ ban đầu';
-  return {half: 'Chia đôi', a: 'Riêng ' + N().a.toLowerCase(), b: 'Riêng ' + N().b, custom: `${N().b} chịu ${fmt(e.custom)}`, company: N().c + ' ứng'}[e.split];
+  return {half: 'Chia đôi', a: 'Riêng ' + N().a, b: 'Riêng ' + N().b, custom: `${N().b} chịu ${fmt(e.custom)}`, company: N().c + ' ứng'}[e.split];
 }
 function stat(label, value, note, cls = '') { return `<div class="stat ${cls}"><div class="stat-label">${esc(label)}</div><div class="stat-value">${esc(value)}</div><div class="stat-note">${esc(note)}</div></div>`; }
 function empty(title, text, action = '') { return `<div class="empty"><img src="./icons/corgi.svg" alt=""><strong>${esc(title)}</strong><p>${esc(text)}</p>${action}</div>`; }
@@ -61,7 +62,7 @@ function expenseHTML(e) {
   const amount = e.kind === 'opening' ? Math.abs(e.balance) : e.amount;
   const meta = e.kind === 'opening' ? owedText(e.balance) : `${esc(N()[e.payer])} trả${e.payer === 'a' && e.sourceId ? ' · ' + esc(sourceName(e.sourceId)) : ''} · ${esc(e.category)}`;
   return `<article class="expense ${company ? 'is-company' : ''}"><span class="cat-icon">${e.kind === 'opening' ? '↶' : company ? '💼' : catIcon(e.category)}</span>
-    <div class="expense-body"><div class="expense-name">${esc(e.description)}</div><div class="expense-meta">${meta}</div>${e.note ? `<div class="expense-note">${esc(e.note)}</div>` : ''}
+    <div class="expense-body"><div class="expense-name"><span class="expense-date">${shortDate(e.date)}</span> · ${esc(e.description)}</div><div class="expense-meta">${meta}</div>${e.note ? `<div class="expense-note">${esc(e.note)}</div>` : ''}
     <div class="expense-tags"><span class="tag ${company ? 'orange' : ''}">${esc(splitLabel(e))}</span>${e.fixedId ? '<span class="tag">↻ Khoản cố định</span>' : ''}${status}${e.review ? reviewTag(e.id) : ''}</div></div>
     <div class="expense-side"><span class="expense-amount">${fmt(amount)}</span>${locked ? '' : `<div>${e.kind !== 'opening' ? `<button class="text-btn" data-edit="${e.id}">Sửa</button>` : ''}<button class="text-btn danger" data-delete="${e.id}">Xoá</button></div>`}</div></article>`;
 }
@@ -70,7 +71,7 @@ const reviewTag = id => `<button class="tag orange" data-reviewed="${id}" title=
 const reviewItems = () => [...db.expenses.filter(e => e.review), ...db.incomes.filter(i => i.review)];
 function incomeHTML(i) {
   return `<article class="expense is-income"><span class="cat-icon">${incomeIcon(i.category)}</span>
-    <div class="expense-body"><div class="expense-name">${esc(i.description)}</div><div class="expense-meta">${esc(i.category)} · vào ${esc(sourceName(i.sourceId))}</div>${i.note ? `<div class="expense-note">${esc(i.note)}</div>` : ''}${i.review ? `<div class="expense-tags">${reviewTag(i.id)}</div>` : ''}</div>
+    <div class="expense-body"><div class="expense-name"><span class="expense-date">${shortDate(i.date)}</span> · ${esc(i.description)}</div><div class="expense-meta">${esc(i.category)} · vào ${esc(sourceName(i.sourceId))}</div>${i.note ? `<div class="expense-note">${esc(i.note)}</div>` : ''}${i.review ? `<div class="expense-tags">${reviewTag(i.id)}</div>` : ''}</div>
     <div class="expense-side"><span class="expense-amount green">+${fmt(i.amount)}</span><div><button class="text-btn" data-edit-income="${i.id}">Sửa</button><button class="text-btn danger" data-delete-income="${i.id}">Xoá</button></div></div></article>`;
 }
 
@@ -86,7 +87,7 @@ function walletHTML(full) {
       <div class="wtile"><span>Dư nợ thẻ / trả sau</span><b class="${w.creditDebt ? 'red' : ''}">${w.creditDebt ? '−' + fmt(w.creditDebt) : fmt(0)}</b></div>
     </div>`;
   if (!full) return `<button class="wallet-mini ${w.spendable < 0 ? 'neg' : ''}" data-page="flow"><span>Còn được tiêu tháng này ≈</span><b>${signed(w.spendable)}</b><small>Tiền đang có ${signed(w.cash)} · nợ còn trả ${fmt(w.due)}${w.missing ? ` · ${w.missing} nguồn chưa nhập số dư` : ''} ›</small></button>`;
-  return `<section class="panel"><div class="panel-head"><h2>👛 Ví của ${esc(N().a.toLowerCase())}</h2><span class="tag">hôm nay</span></div>${tiles}
+  return `<section class="panel"><div class="panel-head"><h2>👛 Ví của ${esc(N().a)}</h2><span class="tag">hôm nay</span></div>${tiles}
     ${w.noAmount ? `<p class="hint orange">${w.noAmount} khoản (thường là thẻ) chưa nhập số tiền, nên “nợ còn trả” đang thiếu.</p>` : ''}
     ${w.missing ? `<p class="hint">Bấm vào nguồn có chữ cam để nhập số dư 1 lần. Sau đó app tự cộng trừ.</p>` : ''}
     <details class="wallet-detail" ${w.missing ? 'open' : ''}><summary>Chi tiết từng nguồn ▾</summary>
@@ -105,7 +106,7 @@ function debtItem(f) {
   const when = f.paid ? `Đã trả ${shortDate(f.paidDate)}` : overdue ? `<b class="red">Quá hạn · ${shortDate(f.due)}</b>` : f.due === today() ? '<b class="red">Hôm nay</b>' : `Hạn ${shortDate(f.due)}`;
   return `<details class="debt-item ${f.paid ? 'paid' : ''} ${overdue ? 'overdue' : ''}"><summary><button class="paid-toggle ${f.paid ? 'on' : ''}" data-paid="${f.id}" aria-label="${f.paid ? 'Bỏ đánh dấu' : 'Trả'} ${esc(f.name)}">${f.paid ? '✓' : ''}</button>
     <span class="debt-name"><span>${TYPE_ICON[f.type]} ${esc(f.name)}${halfTag(f)}</span><small>${when}</small></span><b>${f.amount ? fmt(f.amount) : '<span class="orange">Chưa có số</span>'}</b><i class="chev">▾</i></summary>
-    <div class="debt-more">${line('Loại', FIXED_TYPES[f.type])}${line('Của ai', f.split === 'half' ? `Chia đôi · ${esc(N().b)} chịu ${fmt(Math.round(f.amount / 2))}` : 'Riêng ' + esc(N().a.toLowerCase()))}${f.paid ? line('Trừ từ', esc(partsText(f) || 'Không trừ tiền')) : line('Hạn trả', niceDate(f.due))}
+    <div class="debt-more">${line('Loại', FIXED_TYPES[f.type])}${line('Của ai', f.split === 'half' ? `Chia đôi · ${esc(N().b)} chịu ${fmt(Math.round(f.amount / 2))}` : 'Riêng ' + esc(N().a))}${f.paid ? line('Trừ từ', esc(partsText(f) || 'Không trừ tiền')) : line('Hạn trả', niceDate(f.due))}
       ${remaining !== null ? line('Dư nợ còn lại', fmt(remaining)) : ''}${t ? line('Lặp lại', `ngày ${t.day} hằng tháng${t.amount ? ' · ' + fmt(t.amount) : ''}`) : ''}
       ${f.type === 'card' ? cardSwipe(f) : ''}${f.note ? `<div class="expense-note">${esc(f.note)}</div>` : ''}
       <div class="btn-row">${f.paid ? '' : `<button class="btn primary small" data-paid="${f.id}">✓ Trả khoản này</button>`}<button class="btn ghost small" data-edit-fixed="${f.id}">Sửa</button></div></div></details>`;
@@ -135,13 +136,15 @@ function renderHome() {
   const backupDays = db.lastBackup ? Math.floor((Date.now() - new Date(db.lastBackup)) / 864e5) : null;
   const needBackup = db.expenses.length >= 10 && (backupDays === null || backupDays >= 14);
   return `<section class="panel money-card">
-    <div class="mc-block"><div class="mc-title">💰 Tiền ${esc(N().a.toLowerCase())} còn</div>
-      <div class="mc-pair"><div><span>Tiền mặt · tài khoản</span><b>${signedHTML(w.cash)}</b></div><div><span>Thẻ · ví trả sau còn quẹt</span><b>${card}</b></div></div></div>
-    <div class="mc-block due"><div class="mc-title">📌 Nợ cần trả ${monthName(cur).toLowerCase()}</div>
-      <b class="mc-big ${w.due ? 'red' : 'green'}">${w.due ? '−' + fmt(w.due) : 'Đã trả hết'}</b><small>${unpaid.length} khoản chưa trả${overdue ? ` · <b class="red">${overdue} quá hạn</b>` : ''}${w.noAmount ? ` · ${w.noAmount} khoản chưa có số` : ''}</small></div>
+    <div class="mc-block hero-cash"><div class="mc-title">💰 Tiền ${esc(N().a)} còn</div>
+      <span class="mc-label">Tiền mặt · tài khoản</span><b class="mc-huge">${signedHTML(w.cash)}</b>
+      <div class="mc-sub"><span>💳 Thẻ · ví trả sau còn quẹt</span><b>${card}</b></div></div>
     <div class="mc-block spend ${cashLeft < 0 ? 'neg' : ''}"><div class="mc-title">🛒 Còn được chi tiêu</div>
-      <div class="mc-pair"><div><span>Tiền mặt · tài khoản</span><b>${signed(cashLeft)}</b></div><div><span>Thẻ · ví trả sau</span><b>${card}</b></div></div>
-      <small>= tiền mặt còn − nợ cần trả tháng này${w.missing ? ` · ${w.missing} nguồn chưa nhập số dư` : ''}</small></div>
+      <span class="mc-label">Tiền mặt · tài khoản</span><b class="mc-big">${signed(cashLeft)}</b>
+      <div class="mc-sub"><span>💳 Thẻ · ví trả sau</span><b>${card}</b></div>
+      <small>= tiền mặt còn − nợ còn trả tháng này${w.missing ? ` · ${w.missing} nguồn chưa nhập số dư` : ''}</small></div>
+    <div class="mc-block due"><div class="mc-title">📌 Nợ còn trả ${monthName(cur).toLowerCase()}</div>
+      <b class="mc-mid ${w.due ? 'red' : 'green'}">${w.due ? '−' + fmt(w.due) : 'Đã trả hết'}</b><small>${unpaid.length} khoản chưa trả${overdue ? ` · <b class="red">${overdue} quá hạn</b>` : ''}${w.noAmount ? ` · ${w.noAmount} khoản chưa có số` : ''}</small></div>
     <button class="text-btn" data-page="flow">Chi tiết từng nguồn tiền ›</button></section>
   <div class="quick-add"><button class="btn primary" data-action="add">－ Ghi khoản chi</button><button class="btn green-btn" data-action="add-income">＋ Ghi khoản thu</button></div>
   ${reviewItems().length ? `<button class="due-banner soft" data-page="review"><strong>🔎 ${reviewItems().length} khoản từ sao kê cần xem lại</strong><span>Chi cho ai, mục đích gì · bấm để xem và sửa dần</span></button>` : ''}
@@ -156,7 +159,7 @@ function renderHome() {
     <div class="day-due"><div class="field-label">Đến hạn ${niceDate(selected)}</div>${dayList.length ? dayList.map(debtItem).join('') : '<p class="hint">Ngày này không có khoản cần trả.</p>'}</div></section>
   <details class="panel"><summary><h2>🧾 Thu chi gần đây</h2></summary>
     <div class="list">${recent.length ? recent.map(x => x.payer ? expenseHTML(x) : incomeHTML(x)).join('') : empty('Chưa có khoản nào', 'Bấm “Ghi khoản chi” để bắt đầu.')}</div>
-    <button class="text-btn" data-page="flow">Xem cả tháng ở Dòng tiền ›</button></details>`;
+    <button class="text-btn" data-page="flow" data-flowtab="out">Xem tất cả khoản chi ở Dòng tiền ›</button></details>`;
 }
 
 // ---------- trang Chị & Nhi ----------
@@ -174,19 +177,19 @@ function donut(categories) {
 function renderNhi() {
   const months = [...new Set(db.expenses.map(monthOf))].sort().reverse();
   const rows = nhiRows().filter(withNhi), s = totals(rows), pending = outstanding(rows), n = totals(pending).net;
-  return head(`${esc(N().a)} & ${esc(N().b)}`, 'Chỉ các khoản có chia với ' + esc(N().b) + '. Khoản riêng chị không hiện ở đây.') +
+  return head(`${esc(N().a)} & ${esc(N().b)}`, 'Chỉ các khoản có chia với ' + esc(N().b) + '. Khoản riêng ' + esc(N().a) + ' không hiện ở đây.') +
   `<div class="filters"><select id="nhiScope" aria-label="Phạm vi"><option value="all">Tất cả các tháng</option>${months.map(m => `<option value="${m}" ${m === nhiScope ? 'selected' : ''}>${monthName(m)}</option>`).join('')}</select></div>
   <section class="hero debt"><div><span class="eyebrow">CHƯA THANH TOÁN · ${esc(nhiLabel().toUpperCase())}</span><h2>${esc(netText(n))}</h2><div class="hero-value">${fmt(Math.abs(n))}</div><p>${pending.length} khoản chưa chốt</p>
     <div class="actions"><button class="btn light" data-action="settle" ${pending.length ? '' : 'disabled'}>✓ Đã thanh toán xong</button><button class="btn outline" data-action="copy-nhi">↗ Gửi ${esc(N().b)}</button></div></div></section>
-  <section class="stats">${stat(`Phần ${N().a.toLowerCase()} chịu`, fmt(s.share.a), `${N().a} đã trả ${fmt(s.paid.a)}`)}${stat(`Phần ${N().b} chịu`, fmt(s.share.b), `${N().b} đã trả ${fmt(s.paid.b)}`)}</section>
+  <section class="stats">${stat(`Phần ${N().a} chịu`, fmt(s.share.a), `${N().a} đã trả ${fmt(s.paid.a)}`)}${stat(`Phần ${N().b} chịu`, fmt(s.share.b), `${N().b} đã trả ${fmt(s.paid.b)}`)}</section>
   <section class="panel"><div class="panel-head"><h2>Khoản chờ chốt</h2><span class="tag">${pending.length}</span></div>
     ${pending.length ? pending.slice().sort((a, b) => b.date.localeCompare(a.date)).map(e => `<div class="money-row"><span>${shortDate(e.date)} · ${esc(e.description)}<small>${esc(splitLabel(e))}${e.payer ? ' · ' + esc(N()[e.payer]) + ' trả' : ''}</small></span><b class="${debt(e) < 0 ? 'orange' : ''}">${debt(e) > 0 ? '+' : ''}${fmt(debt(e))}</b></div>`).join('') : empty('Gọn gàng rồi', 'Khoản chưa thanh toán sẽ hiện ở đây.')}
-    <p class="hint">Số dương: ${esc(N().b)} nợ ${esc(N().a.toLowerCase())}. Số âm: ${esc(N().a.toLowerCase())} nợ ${esc(N().b)}.</p></section>
+    <p class="hint">Số dương: ${esc(N().b)} nợ ${esc(N().a)}. Số âm: ${esc(N().a)} nợ ${esc(N().b)}.</p></section>
   <section class="panel"><div class="panel-head"><h2>Tiền đi đâu?</h2><span class="tag">${esc(nhiLabel())}</span></div>${donut(s.categories)}</section>
   <section class="panel"><div class="panel-head"><h2>Lịch sử chốt tiền</h2></div>
     ${db.settlements.length ? db.settlements.map(x => `<div class="history-row"><div><strong>${esc(owedText(x.net))}</strong><small>${esc(x.label)} · ${x.entryIds.length} khoản · ${new Date(x.at).toLocaleDateString('vi-VN')}</small></div><button class="btn ghost small" data-undo="${x.id}">Hoàn tác</button></div>`).join('') : '<p class="hint">Chưa có kỳ nào được chốt.</p>'}</section>
   <details class="panel"><summary><h2>Nợ từ trước khi dùng app</h2></summary>
-    <form id="openingForm"><label>Chiều nợ<select name="direction"><option value="1">${esc(N().b)} nợ ${esc(N().a.toLowerCase())}</option><option value="-1">${esc(N().a)} nợ ${esc(N().b)}</option></select></label>
+    <form id="openingForm"><label>Chiều nợ<select name="direction"><option value="1">${esc(N().b)} nợ ${esc(N().a)}</option><option value="-1">${esc(N().a)} nợ ${esc(N().b)}</option></select></label>
     <div class="form-row"><label>Số tiền<input name="amount" required inputmode="decimal" placeholder="Ví dụ: 500k"></label><label>Ngày<input name="date" type="date" required value="${today()}"></label></div>
     <button class="btn ghost small">Thêm số dư ban đầu</button></form></details>`;
 }
@@ -211,7 +214,7 @@ function renderFixed() {
   const sum = rows.reduce((s, f) => s + f.amount, 0), paid = rows.filter(f => f.paid).reduce((s, f) => s + f.amount, 0), overdue = rows.filter(f => !f.paid && f.due < today()).length;
   const templates = db.templates.filter(t => fixedType === 'all' || t.type === fixedType);
   const tabs = [['all', 'Tất cả'], ['card', '💳 Thẻ'], ['debt', '🏦 Nợ'], ['bill', '🧾 Chi']];
-  return head('Góc cố định', 'Thẻ tín dụng, nợ, chi cố định. Riêng của chị, không chia với ai.', `<button class="btn primary small" data-action="add-fixed">＋ Thêm</button>`) +
+  return head('Góc cố định', `Thẻ tín dụng, nợ, chi cố định của ${esc(N().a)}.`, `<button class="btn primary small" data-action="add-fixed">＋ Thêm</button>`) +
   `<div class="segment">${tabs.map(([k, l]) => `<button data-ftype="${k}" class="${fixedType === k ? 'on' : ''}">${l}<small>${k === 'all' ? all.length : all.filter(f => f.type === k).length}</small></button>`).join('')}</div>
   <section class="hero fixed"><div>${monthNav(fixedMonth, 'fixed')}<div class="hero-value">${fmt(sum - paid)}</div><p>còn phải trả · tổng ${fmt(sum)} · đã trả ${fmt(paid)}${overdue ? ` · <b>${overdue} quá hạn</b>` : ''}</p>
     <div class="progress"><i style="width:${sum ? Math.round(paid / sum * 100) : 0}%"></i></div></div></section>
@@ -228,24 +231,55 @@ function renderFlow() {
   const c = cashflow(db, flowMonth), incomes = db.incomes.filter(i => i.date.slice(0, 7) === flowMonth).sort((a, b) => b.date.localeCompare(a.date));
   const sign = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n));
   const spendRows = Object.entries(c.spendBy).sort((a, b) => b[1] - a[1]);
-  return head('Dòng tiền', 'Tiền thật vào – ra túi chị mỗi tháng.', '<button class="btn primary small green-btn" data-action="add-income">＋ Khoản thu</button>') +
+  return head('Dòng tiền', `Tiền thật vào – ra túi ${esc(N().a)}, tra cứu mọi khoản thu chi.`, '<button class="btn primary small green-btn" data-action="add-income">＋ Khoản thu</button>') +
   walletHTML(true) + `<section class="hero flow ${c.net < 0 ? 'neg' : ''}"><div>${monthNav(flowMonth, 'flow')}<span class="eyebrow">CÒN LẠI SAU THÁNG</span><div class="hero-value">${sign(c.net)}</div>
     <div class="flow-bars"><div><span>Tiền vào</span><b class="green">+${fmt(c.cashIn)}</b></div><div><span>Tiền ra thật</span><b class="red">−${fmt(c.cashOut)}</b></div></div></div></section>
   <section class="panel"><div class="panel-head"><h2>Tiền vào</h2><b class="green">+${fmt(c.cashIn)}</b></div>
     ${Object.entries(c.incomeBy).sort((a, b) => b[1] - a[1]).map(([k, v]) => line(`${incomeIcon(k)} ${esc(k)}`, '+' + fmt(v))).join('')}
-    ${c.fromNhi ? line(`⇄ ${esc(N().b)} trả ${esc(N().a.toLowerCase())} <small>tự tính khi chốt</small>`, '+' + fmt(c.fromNhi)) : ''}
+    ${c.fromNhi ? line(`⇄ ${esc(N().b)} trả ${esc(N().a)} <small>tự tính khi chốt</small>`, '+' + fmt(c.fromNhi)) : ''}
     ${c.fromCompany ? line(`💼 ${esc(N().c)} hoàn ứng <small>tự tính khi nhận</small>`, '+' + fmt(c.fromCompany)) : ''}
     ${c.cashIn ? '' : '<p class="hint">Chưa có khoản thu tháng này. Bấm “＋ Khoản thu” để ghi lương, vay, thu khác.</p>'}</section>
   <section class="panel"><div class="panel-head"><h2>Tiền ra thật</h2><b class="red">−${fmt(c.cashOut)}</b></div>
     ${line('💵 Chi trả ngay <small>tiền mặt, chuyển khoản, ví</small>', fmt(c.immediate))}
     ${Object.entries(c.fixedBy).map(([k, v]) => line(`${TYPE_ICON[k]} Trả ${FIXED_TYPES[k].toLowerCase()} <small>đã tick ở Góc cố định</small>`, fmt(v))).join('')}
     ${c.toNhi ? line(`⇄ ${esc(N().a)} trả ${esc(N().b)}`, fmt(c.toNhi)) : ''}
-    ${c.credit ? `<p class="hint">💳 ${fmt(c.credit)} quẹt thẻ / trả sau tháng này <b>chưa tính</b> vào đây. Tiền thật ra khi chị tick đã trả thẻ ở Góc cố định, nên không bị tính trùng.</p>` : ''}</section>
+    ${c.credit ? `<p class="hint">💳 ${fmt(c.credit)} quẹt thẻ / trả sau tháng này <b>chưa tính</b> vào đây. Tiền thật ra khi ${esc(N().a)} tick đã trả thẻ ở Góc cố định, nên không bị tính trùng.</p>` : ''}</section>
   <section class="panel"><div class="panel-head"><h2>Chi tiêu theo nguồn</h2><span class="tag">${fmt(c.spend)}</span></div>
-    ${spendRows.length ? spendRows.map(([id, v]) => { const x = source(id); return line(`${x ? SOURCE_ICON[x.kind] : '❔'} ${esc(sourceName(id))}${x && isCredit(x.kind) ? ' <span class="tag orange">trả sau</span>' : ''}`, fmt(v)); }).join('') : '<p class="hint">Chưa có khoản chi nào chị trả trong tháng.</p>'}
-    <p class="hint">Gồm mọi khoản chị trả, kể cả phần chi hộ ${esc(N().b)} và ${esc(N().c.toLowerCase())}.</p></section>
-  <section class="panel"><div class="panel-head"><h2>Các khoản thu</h2><span class="tag">${incomes.length}</span></div>
-    <div class="list">${incomes.length ? incomes.map(incomeHTML).join('') : empty('Chưa ghi khoản thu', 'Lương, thưởng, tiền vay, thu nhập khác…', '<button class="btn ghost small" data-action="add-income">＋ Ghi khoản thu</button>')}</div></section>`;
+    ${spendRows.length ? spendRows.map(([id, v]) => { const x = source(id); return line(`${x ? SOURCE_ICON[x.kind] : '❔'} ${esc(sourceName(id))}${x && isCredit(x.kind) ? ' <span class="tag orange">trả sau</span>' : ''}`, fmt(v)); }).join('') : `<p class="hint">Chưa có khoản chi nào ${esc(N().a)} trả trong tháng.</p>`}
+    <p class="hint">Gồm mọi khoản ${esc(N().a)} trả, kể cả phần chi hộ ${esc(N().b)} và ${esc(N().c.toLowerCase())}.</p></section>
+  ` + flowLedgerHTML();
+}
+
+// Sổ tra cứu thu chi: tab Khoản chi / Khoản thu + chọn khoảng thời gian
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+function flowSpan() {
+  const t = today(), back = n => { const d = new Date(t + 'T00:00:00'); d.setDate(d.getDate() - n + 1); return ymd(d); };
+  if (flowRange === 'month') return [flowMonth + '-01', flowMonth + '-31', monthName(flowMonth)];
+  if (flowRange === 'all') return ['', '9999-99-99', 'Toàn bộ'];
+  if (flowRange === 'custom') { const f = flowFrom || '', to = flowTo || '9999-99-99'; return [f, to, `${f ? niceDate(f) : 'đầu'} → ${flowTo ? niceDate(flowTo) : 'nay'}`]; }
+  const n = Number(flowRange); return [back(n), t, `${n} ngày gần nhất`];
+}
+function flowLedgerHTML() {
+  const [from, to, label] = flowSpan(), inSpan = x => x.date >= from && x.date <= to;
+  const order = (a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || '');
+  const outs = db.expenses.filter(e => e.kind !== 'opening' && inSpan(e)).sort(order), ins = db.incomes.filter(inSpan).sort(order);
+  const list = flowTab === 'out' ? outs : ins, total = list.reduce((t, x) => t + x.amount, 0);
+  const mine = flowTab === 'out' ? outs.filter(e => e.payer === 'a').reduce((t, e) => t + e.amount, 0) : 0;
+  const opt = (v, l) => `<option value="${v}" ${flowRange === v ? 'selected' : ''}>${l}</option>`;
+  let rows = '', last = '';
+  list.slice(0, flowLimit).forEach(x => {
+    const m = x.date.slice(0, 7);
+    if (m !== last) { const sub = list.filter(y => y.date.slice(0, 7) === m).reduce((t, y) => t + y.amount, 0); rows += `<div class="ledger-month"><span>${monthName(m)}</span><b>${flowTab === 'out' ? '' : '+'}${fmt(sub)}</b></div>`; last = m; }
+    rows += flowTab === 'out' ? expenseHTML(x) : incomeHTML(x);
+  });
+  return `<section class="panel ledger" id="ledger"><div class="panel-head"><h2>🧾 Tra cứu thu chi</h2></div>
+    <div class="segment"><button data-flowtab="out" class="${flowTab === 'out' ? 'on' : ''}">Khoản chi<small>${outs.length}</small></button><button data-flowtab="in" class="${flowTab === 'in' ? 'on' : ''}">Khoản thu<small>${ins.length}</small></button></div>
+    <label class="ledger-range">Thời gian<select id="flowRange">${opt('month', 'Theo tháng đang xem (' + monthName(flowMonth) + ')')}${opt('7', '7 ngày gần nhất')}${opt('30', '30 ngày gần nhất')}${opt('90', '3 tháng gần nhất')}${opt('all', 'Toàn bộ')}${opt('custom', 'Tự chọn từ ngày – đến ngày')}</select></label>
+    ${flowRange === 'custom' ? `<div class="form-row"><label>Từ ngày<input type="date" id="flowFrom" value="${flowFrom}"></label><label>Đến ngày<input type="date" id="flowTo" value="${flowTo}"></label></div>` : ''}
+    <div class="ledger-total"><span>${esc(label)} · ${list.length} khoản</span><b class="${flowTab === 'out' ? 'red' : 'green'}">${flowTab === 'out' ? '−' : '+'}${fmt(total)}</b></div>
+    ${flowTab === 'out' && list.length && mine !== total ? `<p class="hint">Trong đó ${esc(N().a)} trả ${fmt(mine)}, ${esc(N().b)} trả ${fmt(total - mine)}. Đã gồm khoản quẹt thẻ / trả sau.</p>` : ''}
+    <div class="list">${rows || (flowTab === 'out' ? empty('Không có khoản chi', 'Không có khoản chi nào trong khoảng thời gian này.') : empty('Không có khoản thu', 'Lương, thưởng, tiền vay, thu nhập khác…', '<button class="btn ghost small" data-action="add-income">＋ Ghi khoản thu</button>'))}</div>
+    ${list.length > flowLimit ? `<button class="btn ghost small ledger-more" data-flowmore="1">Hiện thêm (${list.length - flowLimit} khoản)</button>` : ''}</section>`;
 }
 
 // ---------- trang Cần xem lại ----------
@@ -287,7 +321,7 @@ function render() {
   $('#view').innerHTML = (loadError ? '<div class="notice">Chưa đọc được dữ liệu đã lưu. App đang giữ nguyên bản gốc; vào Cài đặt để tải bản gốc hoặc khôi phục backup.</div>' : '') + pages[page]();
   $$('.tabbar [data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === page));
   $('#tabNhi').textContent = N().b;
-  $('#brandSub').textContent = 'Sổ chi tiêu của ' + (N().full || N().a).split(' ').pop();
+  $('#brandSub').textContent = 'Sổ chi tiêu của ' + capName((N().full || N().a).split(' ').pop());
   $('#fab').hidden = !['home', 'fixed', 'flow'].includes(page);
   if (page === 'settings') updateOffline();
 }
@@ -319,7 +353,7 @@ const X = () => $('#expenseForm').elements;
 function drawExpenseChips() {
   const x = X(), company = x.split.value === 'company';
   if (company) x.payer.value = 'a';
-  $('#splitChips').innerHTML = chipHTML('split', [['half', 'Chia đôi'], ['a', 'Riêng ' + N().a.toLowerCase()], ['b', 'Riêng ' + N().b], ['custom', 'Tuỳ chỉnh'], ...(company ? [['company', '💼 ' + N().c + ' ứng']] : [])], x.split.value);
+  $('#splitChips').innerHTML = chipHTML('split', [['half', 'Chia đôi'], ['a', 'Riêng ' + N().a], ['b', 'Riêng ' + N().b], ['custom', 'Tuỳ chỉnh'], ...(company ? [['company', '💼 ' + N().c + ' ứng']] : [])], x.split.value);
   $('#payerChips').innerHTML = chipHTML('payer', [['a', N().a], ['b', N().b]], x.payer.value);
   $('#payerBlock').hidden = company;
   $('#sourceBlock').hidden = x.payer.value === 'b';
@@ -360,7 +394,7 @@ $('#expenseForm').addEventListener('input', ev => {
     if (last) {
       if (![...x.category.options].some(o => o.value === last.category)) x.category.add(new Option(last.category, last.category));
       x.category.value = last.category; x.split.value = last.split; x.payer.value = last.payer; x.custom.value = last.custom || ''; if (last.sourceId && source(last.sourceId)) x.sourceId.value = last.sourceId;
-      $('#memoryHint').textContent = '🐶 Corgi nhớ cách chia lần trước, chị đổi lại được.'; drawExpenseChips(); return;
+      $('#memoryHint').textContent = '🐶 Corgi nhớ cách chia lần trước, đổi lại được.'; drawExpenseChips(); return;
     }
     $('#memoryHint').textContent = '';
   }
@@ -521,7 +555,7 @@ const F = () => $('#fixedForm').elements;
 function drawFixedChips() {
   const f = F(), type = f.type.value, template = f.mode.value === 'template', isNew = !f.id.value;
   $('#typeChips').innerHTML = chipHTML('type', Object.entries(FIXED_TYPES).map(([k, l]) => [k, TYPE_ICON[k] + ' ' + l]), type);
-  $('#fixedSplitChips').innerHTML = chipHTML('split', [['a', '👤 Riêng ' + esc(N().a.toLowerCase())], ['half', '½ Chia đôi với ' + esc(N().b)]], f.split.value);
+  $('#fixedSplitChips').innerHTML = chipHTML('split', [['a', '👤 Riêng ' + esc(N().a)], ['half', '½ Chia đôi với ' + esc(N().b)]], f.split.value);
   $('#nameLabel').textContent = {card: 'Tên thẻ', debt: 'Tên khoản nợ', bill: 'Tên khoản chi'}[type];
   $('#amountLabel').textContent = type === 'card' ? 'Số sao kê cần trả' : type === 'debt' ? 'Trả mỗi kỳ' : 'Số tiền';
   $('#dueText').textContent = template ? 'Ngày đến hạn (theo tháng)' : 'Hạn thanh toán';
@@ -636,6 +670,8 @@ document.addEventListener('click', async ev => {
     const form = b.closest('form'), input = form.elements[b.dataset.chip]; input.value = b.dataset.value;
     form === $('#expenseForm') ? drawExpenseChips() : form === $('#incomeForm') ? drawIncomeChips() : form === $('#confirmDialog form') ? drawConfirmChips() : drawFixedChips(); return;
   }
+  if (b.dataset.flowtab) { flowTab = b.dataset.flowtab; flowLimit = 100; if (b.dataset.page) { ev.preventDefault(); flowRange = 'month'; flowMonth = today().slice(0, 7); go(b.dataset.page); return requestAnimationFrame(() => $('#ledger')?.scrollIntoView({block: 'start'})); } return render(); }
+  if (b.dataset.flowmore) { flowLimit += 100; return render(); }
   if (b.dataset.page) { ev.preventDefault(); return go(b.dataset.page); }
   if (b.dataset.close) return $('#' + b.dataset.close).close();
   if (b.dataset.action) return action(b.dataset.action);
@@ -703,6 +739,8 @@ document.addEventListener('toggle', ev => { if (ev.target.classList?.contains('d
 document.addEventListener('change', async ev => {
   const t = ev.target;
   if (t.id === 'nhiScope') { nhiScope = t.value; return render(); }
+  if (t.id === 'flowRange') { flowRange = t.value; flowLimit = 100; return render(); }
+  if (t.id === 'flowFrom' || t.id === 'flowTo') { if (t.id === 'flowFrom') flowFrom = t.value; else flowTo = t.value; flowLimit = 100; return render(); }
   if (t.id === 'importFile') {
     const file = t.files[0]; t.value = ''; if (!file) return;
     try {
@@ -715,7 +753,7 @@ document.addEventListener('change', async ev => {
         if (r.removed.length) lines.push('Bỏ nguồn không dùng: ' + r.removed.join(', '));
         if (r.deleted) lines.push(`Xoá ${r.deleted} khoản trùng`);
         if (r.added || r.updated) lines.push(`Thêm ${r.added} khoản · cập nhật ${r.updated} khoản chưa phân loại`);
-        if (r.kept) lines.push(`${r.kept} khoản chị đã phân loại: giữ nguyên`);
+        if (r.kept) lines.push(`${r.kept} khoản đã phân loại: giữ nguyên`);
         if (r.tplAdded.length) lines.push('Thêm lịch cố định: ' + r.tplAdded.join(', '));
         if (r.tplUpdated.length) lines.push('Sửa lịch cố định: ' + r.tplUpdated.join(', '));
         if (r.tplRemoved.length) lines.push('Bỏ lịch cố định: ' + r.tplRemoved.join(', '));

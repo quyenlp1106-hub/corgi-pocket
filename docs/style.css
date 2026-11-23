@@ -278,3 +278,19 @@ details.panel>summary h2{margin:0}
 .pay-row{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 36px;gap:8px;margin-bottom:8px}
 .pay-row [hidden]{display:none}
 #payAddRow{margin-bottom:12px}
+
+/* v10: tổng quan ưu tiên tiền còn, sổ tra cứu thu chi */
+.mc-label{font-size:11.5px;color:var(--muted)}
+.mc-huge{font-size:30px;line-height:1.1;overflow-wrap:anywhere}
+.mc-mid{font-size:19px}
+.mc-block.hero-cash{border:1px solid #3a3a40;background:linear-gradient(180deg,#232327,var(--panel2))}
+.mc-sub{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding-top:8px;margin-top:2px;border-top:1px dashed var(--border);font-size:12.5px;color:var(--muted)}
+.mc-sub b{font-size:14px;color:var(--text);white-space:nowrap}
+.mc-block.spend .mc-big{color:var(--green)}
+.mc-block.spend.neg .mc-big{color:var(--red2)}
+.expense-date{color:var(--muted);font-weight:600;font-variant-numeric:tabular-nums}
+.ledger-range{display:grid;gap:6px;font-size:13px;color:var(--muted);margin-bottom:10px}
+.ledger-total{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:10px 12px;background:var(--panel2);border-radius:12px;margin:4px 0 8px;font-size:13px;color:var(--muted)}
+.ledger-total b{font-size:16px}
+.ledger-month{display:flex;justify-content:space-between;font-size:12.5px;font-weight:700;color:var(--muted);padding:12px 2px 4px;border-bottom:1px solid var(--border)}
+.ledger-more{width:100%;margin-top:10px}
