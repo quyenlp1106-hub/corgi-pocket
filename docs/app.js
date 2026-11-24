@@ -109,7 +109,7 @@ function debtItem(f) {
     <div class="debt-more">${line('Loại', FIXED_TYPES[f.type])}${line('Của ai', f.split === 'half' ? `Chia đôi · ${esc(N().b)} chịu ${fmt(Math.round(f.amount / 2))}` : 'Riêng ' + esc(N().a))}${f.paid ? line('Trừ từ', esc(partsText(f) || 'Không trừ tiền')) : line('Hạn trả', niceDate(f.due))}
       ${remaining !== null ? line('Dư nợ còn lại', fmt(remaining)) : ''}${t ? line('Lặp lại', `ngày ${t.day} hằng tháng${t.amount ? ' · ' + fmt(t.amount) : ''}`) : ''}
       ${f.type === 'card' ? cardSwipe(f) : ''}${f.note ? `<div class="expense-note">${esc(f.note)}</div>` : ''}
-      <div class="btn-row">${f.paid ? '' : `<button class="btn primary small" data-paid="${f.id}">✓ Trả khoản này</button>`}<button class="btn ghost small" data-edit-fixed="${f.id}">Sửa</button></div></div></details>`;
+      <div class="btn-row">${f.paid ? `<button class="btn ghost small" data-repay="${f.id}">✎ Sửa nguồn trả</button>` : `<button class="btn primary small" data-paid="${f.id}">✓ Trả khoản này</button>`}<button class="btn ghost small" data-edit-fixed="${f.id}">Sửa</button></div></div></details>`;
 }
 let debtOpen = true;
 function renderHome() {
@@ -218,7 +218,7 @@ function fixedRow(f) {
   return `<article class="fixed-row ${f.paid ? 'paid' : ''}"><button class="paid-toggle ${f.paid ? 'on' : ''}" data-paid="${f.id}" aria-label="${f.paid ? 'Bỏ đánh dấu' : 'Đánh dấu'} đã trả ${esc(f.name)}" aria-pressed="${f.paid}">${f.paid ? '✓' : ''}</button>
     <div class="expense-body"><div class="expense-name">${TYPE_ICON[f.type]} ${esc(f.name)}${t ? ' <span class="muted small">↻</span>' : ''}${halfTag(f)}</div>
     ${f.type === 'card' ? cardSwipe(f) : ''}<div class="expense-meta ${overdue ? 'red' : ''}">${f.paid ? `Đã trả ${shortDate(f.paidDate)}${paidParts(f).length ? ' · ' + esc(partsText(f)) : ''}` : `Hạn ${shortDate(f.due)}${overdue ? ' · <b>quá hạn</b>' : ''}`}${remaining !== null ? ` · còn nợ ${fmt(remaining)}` : ''}</div>${f.note ? `<div class="expense-note">${esc(f.note)}</div>` : ''}</div>
-    <div class="expense-side"><span class="expense-amount">${f.amount ? fmt(f.amount) : '<span class="orange">Nhập số</span>'}</span><div><button class="text-btn" data-edit-fixed="${f.id}">Sửa</button><button class="text-btn danger" data-delete-fixed="${f.id}">Xoá</button></div></div></article>`;
+    <div class="expense-side"><span class="expense-amount">${f.amount ? fmt(f.amount) : '<span class="orange">Nhập số</span>'}</span><div>${f.paid ? `<button class="text-btn" data-repay="${f.id}">Sửa nguồn</button>` : ''}<button class="text-btn" data-edit-fixed="${f.id}">Sửa</button><button class="text-btn danger" data-delete-fixed="${f.id}">Xoá</button></div></div></article>`;
 }
 function renderFixed() {
   ensureFixed(fixedMonth);
@@ -271,6 +271,12 @@ function flowSpan() {
   if (flowRange === 'custom') { const f = flowFrom || '', to = flowTo || '9999-99-99'; return [f, to, `${f ? niceDate(f) : 'đầu'} → ${flowTo ? niceDate(flowTo) : 'nay'}`]; }
   const n = Number(flowRange); return [back(n), t, `${n} ngày gần nhất`];
 }
+function fixedMoveHTML(f) {
+  return `<article class="expense"><span class="cat-icon">${TYPE_ICON[f.type]}</span>
+    <div class="expense-body"><div class="expense-name"><span class="expense-date">${shortDate(f.paidDate)}</span> · ${esc(f.name)}</div><div class="expense-meta">Trả cố định · ${esc(partsText(f) || 'không trừ nguồn nào')}</div>
+    <div class="expense-tags"><span class="tag">📌 ${esc(FIXED_TYPES[f.type])}</span></div></div>
+    <div class="expense-side"><span class="expense-amount">${fmt(f.amount)}</span><div><button class="text-btn" data-repay="${f.id}">Sửa nguồn</button></div></div></article>`;
+}
 function moveHTML(m) {
   const x = m.x;
   return `<article class="expense ${m.out ? '' : 'is-income'}"><span class="cat-icon">⇄</span>
@@ -282,22 +288,23 @@ function flowLedgerHTML() {
   const [from, to, label] = flowSpan(), inSpan = x => x.date >= from && x.date <= to;
   const order = (a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || '');
   const moves = db.settlements.filter(x => transferOf(x)).map(x => ({kind: 'settle', x, date: ymd(new Date(x.at)), createdAt: x.at, amount: Math.abs(transferOf(x)), out: transferOf(x) < 0})).filter(inSpan);
-  const outs = [...db.expenses.filter(e => e.kind !== 'opening' && inSpan(e)), ...moves.filter(m => m.out)].sort(order), ins = [...db.incomes.filter(inSpan), ...moves.filter(m => !m.out)].sort(order);
+  const fixedPaid = db.fixed.filter(f => f.paid && f.amount && f.paidDate && !db.expenses.some(e => e.fixedId === f.id)).map(f => ({kind: 'fixed', f, date: f.paidDate, createdAt: f.paidAt, amount: f.amount})).filter(inSpan);
+  const outs = [...db.expenses.filter(e => e.kind !== 'opening' && inSpan(e)), ...moves.filter(m => m.out), ...fixedPaid].sort(order), ins = [...db.incomes.filter(inSpan), ...moves.filter(m => !m.out)].sort(order);
   const list = flowTab === 'out' ? outs : ins, total = list.reduce((t, x) => t + x.amount, 0);
-  const mine = flowTab === 'out' ? outs.filter(e => e.payer === 'a' || e.kind === 'settle').reduce((t, e) => t + e.amount, 0) : 0;
+  const mine = flowTab === 'out' ? outs.filter(e => e.payer === 'a' || e.kind === 'settle' || e.kind === 'fixed').reduce((t, e) => t + e.amount, 0) : 0;
   const opt = (v, l) => `<option value="${v}" ${flowRange === v ? 'selected' : ''}>${l}</option>`;
   let rows = '', last = '';
   list.slice(0, flowLimit).forEach(x => {
     const m = x.date.slice(0, 7);
     if (m !== last) { const sub = list.filter(y => y.date.slice(0, 7) === m).reduce((t, y) => t + y.amount, 0); rows += `<div class="ledger-month"><span>${monthName(m)}</span><b>${flowTab === 'out' ? '' : '+'}${fmt(sub)}</b></div>`; last = m; }
-    rows += x.kind === 'settle' ? moveHTML(x) : flowTab === 'out' ? expenseHTML(x) : incomeHTML(x);
+    rows += x.kind === 'settle' ? moveHTML(x) : x.kind === 'fixed' ? fixedMoveHTML(x.f) : flowTab === 'out' ? expenseHTML(x) : incomeHTML(x);
   });
   return `<section class="panel ledger" id="ledger"><div class="panel-head"><h2>🧾 Tra cứu thu chi</h2></div>
     <div class="segment"><button data-flowtab="out" class="${flowTab === 'out' ? 'on' : ''}">Khoản chi<small>${outs.length}</small></button><button data-flowtab="in" class="${flowTab === 'in' ? 'on' : ''}">Khoản thu<small>${ins.length}</small></button></div>
     <label class="ledger-range">Thời gian<select id="flowRange">${opt('month', 'Theo tháng đang xem (' + monthName(flowMonth) + ')')}${opt('7', '7 ngày gần nhất')}${opt('30', '30 ngày gần nhất')}${opt('90', '3 tháng gần nhất')}${opt('all', 'Toàn bộ')}${opt('custom', 'Tự chọn từ ngày – đến ngày')}</select></label>
     ${flowRange === 'custom' ? `<div class="form-row"><label>Từ ngày<input type="date" id="flowFrom" value="${flowFrom}"></label><label>Đến ngày<input type="date" id="flowTo" value="${flowTo}"></label></div>` : ''}
     <div class="ledger-total"><span>${esc(label)} · ${list.length} khoản</span><b class="${flowTab === 'out' ? 'red' : 'green'}">${flowTab === 'out' ? '−' : '+'}${fmt(total)}</b></div>
-    ${flowTab === 'out' && list.length && mine !== total ? `<p class="hint">Trong đó ${esc(N().a)} trả ${fmt(mine)}, ${esc(N().b)} trả ${fmt(total - mine)}. Đã gồm khoản quẹt thẻ / trả sau.</p>` : ''}
+    ${flowTab === 'out' && list.length && mine !== total ? `<p class="hint">Trong đó ${esc(N().a)} trả ${fmt(mine)}, ${esc(N().b)} trả ${fmt(total - mine)}. Đã gồm khoản quẹt thẻ / trả sau và khoản trả cố định.</p>` : ''}
     <div class="list">${rows || (flowTab === 'out' ? empty('Không có khoản chi', 'Không có khoản chi nào trong khoảng thời gian này.') : empty('Không có khoản thu', 'Lương, thưởng, tiền vay, thu nhập khác…', '<button class="btn ghost small" data-action="add-income">＋ Ghi khoản thu</button>'))}</div>
     ${list.length > flowLimit ? `<button class="btn ghost small ledger-more" data-flowmore="1">Hiện thêm (${list.length - flowLimit} khoản)</button>` : ''}</section>`;
 }
@@ -564,10 +571,12 @@ function drawPay() {
 }
 function openPay(id) {
   const f = db.fixed.find(r => r.id === id), form = $('#payForm'); form.reset(); const x = form.elements;
-  x.fid.value = id; x.amount.value = f.amount || ''; x.date.value = today();
-  $('#payTitle').textContent = `${TYPE_ICON[f.type]} Trả ${f.name}`;
-  $('#payInfo').textContent = `Hạn ${niceDate(f.due)} · dự kiến ${f.amount ? fmt(f.amount) : 'chưa có số'}. Tháng này trả khác (thẻ tín dụng…) thì sửa số tiền cho đúng.`;
-  $('#payRows').innerHTML = payRowHTML(lastVia());
+  const parts = paidParts(f), plain = n => formatMoney(n).replace(/\s*đ$/, '');
+  x.fid.value = id; x.amount.value = f.amount || ''; x.date.value = f.paid && f.paidDate ? f.paidDate : today();
+  $('#payTitle').textContent = `${TYPE_ICON[f.type]} ${f.paid ? 'Sửa lần trả' : 'Trả'} ${f.name}`;
+  $('#payInfo').textContent = f.paid ? `Đang ghi: ${partsText(f) || 'không trừ nguồn nào'}. Đổi nguồn hoặc số tiền rồi lưu lại, số dư các nguồn tự tính lại.` : `Hạn ${niceDate(f.due)} · dự kiến ${f.amount ? fmt(f.amount) : 'chưa có số'}. Tháng này trả khác (thẻ tín dụng…) thì sửa số tiền cho đúng.`;
+  if (f.paid && !parts.length) x.none.checked = true;
+  $('#payRows').innerHTML = parts.length ? parts.map(p => payRowHTML(p.sourceId, parts.length > 1 ? plain(p.amount) : '')).join('') : payRowHTML(lastVia());
   drawPay(); $('#payDialog').showModal();
   if (!f.amount) setTimeout(() => x.amount.focus(), 50);
 }
@@ -589,7 +598,7 @@ $('#payForm').onsubmit = ev => {
     if (sum !== amount) { toast(`Các nguồn cộng lại ${fmt(sum)}, chưa khớp ${fmt(amount)}.`); return; }
   }
   if (mutate(d => { const r = d.fixed.find(y => y.id === f.id); Object.assign(r, {amount, paid: true, paidDate: x.date.value, paidAt: new Date().toISOString(), paidFrom: null, paidSplit: none ? null : parts}); syncFixedShare(d, r.id, uid); })) {
-    $('#payDialog').close(); render(); toast(`Đã trả ${f.name} ✓`);
+    $('#payDialog').close(); render(); toast(f.paid ? `Đã sửa lần trả ${f.name} ✓` : `Đã trả ${f.name} ✓`);
   }
 };
 
@@ -765,6 +774,7 @@ document.addEventListener('click', async ev => {
       if (mutate(d => { const r = d.fixed.find(x => x.id === f.id); Object.assign(r, {paid: false, paidDate: null, paidAt: null, paidFrom: null, paidSplit: null}); syncFixedShare(d, f.id, uid); })) { render(); toast('Đã bỏ đánh dấu.'); }
     return;
   }
+  if (b.dataset.repay) return openPay(b.dataset.repay);
   if (b.dataset.editFixed) return openFixed('fixed', b.dataset.editFixed);
   if (b.dataset.editTemplate) return openFixed('template', b.dataset.editTemplate);
   if (b.dataset.deleteFixed) {
