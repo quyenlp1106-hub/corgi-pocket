@@ -71,16 +71,29 @@ export const outstanding = entries => entries.filter(e => e.split !== 'company' 
 export const companyPending = entries => entries.filter(e => e.split === 'company' && !e.reimburseId);
 
 // Chốt tiền với Nhi
-export function closePeriod(db, ids, id, at, label) {
+// pay (tuỳ chọn) = {paid, via, carryId}: paid là tiền chuyển thật, dương = Nhi chuyển chị, âm = chị chuyển Nhi.
+// Nếu paid khác số nợ, phần còn lại thành 1 khoản "Còn lại sau cấn trừ" chờ kỳ sau.
+export const transferOf = s => s.paid ?? s.net;
+export function closePeriod(db, ids, id, at, label, pay = null) {
   const chosen = db.expenses.filter(e => ids.includes(e.id));
   if (!chosen.length || chosen.some(e => e.settlementId || e.split === 'company')) throw Error('Kỳ này đã được chốt hoặc không có khoản nào');
-  const net = totals(chosen).net;
-  return {...db,
-    expenses: db.expenses.map(e => ids.includes(e.id) ? {...e, settlementId: id} : e),
-    settlements: [{id, at, label, net, entryIds: chosen.map(e => e.id)}, ...db.settlements]};
+  const net = totals(chosen).net, row = {id, at, label, net, entryIds: chosen.map(e => e.id)};
+  const expenses = db.expenses.map(e => ids.includes(e.id) ? {...e, settlementId: id} : e);
+  if (pay) {
+    if (!Number.isSafeInteger(pay.paid) || Math.abs(pay.paid) > MAX) throw Error('Số tiền chuyển không hợp lệ');
+    row.paid = pay.paid; row.via = pay.paid ? pay.via || null : null;
+    const rest = net - pay.paid;
+    if (rest) {
+      row.carryId = pay.carryId;
+      expenses.push({id: pay.carryId, kind: 'opening', description: 'Còn lại sau cấn trừ ' + label, date: localDate(at), balance: rest, settlementId: null, createdAt: at});
+    }
+  }
+  return {...db, expenses, settlements: [row, ...db.settlements]};
 }
 export function undoPeriod(db, id) {
-  return {...db, expenses: db.expenses.map(e => e.settlementId === id ? {...e, settlementId: null} : e), settlements: db.settlements.filter(s => s.id !== id)};
+  const s = db.settlements.find(x => x.id === id), carry = s?.carryId && db.expenses.find(e => e.id === s.carryId);
+  if (carry?.settlementId) throw Error('Phần còn lại của kỳ này đã được cấn trừ ở kỳ sau. Hoàn tác kỳ sau trước nhé.');
+  return {...db, expenses: db.expenses.filter(e => !carry || e.id !== carry.id).map(e => e.settlementId === id ? {...e, settlementId: null} : e), settlements: db.settlements.filter(x => x.id !== id)};
 }
 
 // Công ty đã chuyển hoàn ứng
@@ -181,7 +194,7 @@ export function balance(db, s) {
   for (const i of db.incomes) if (i.sourceId === s.id && from(i.date, i.createdAt)) n += i.amount;
   for (const e of db.expenses) if (e.kind !== 'opening' && e.payer === 'a' && e.sourceId === s.id && from(e.date, e.createdAt)) n -= e.amount;
   for (const f of db.fixed) if (f.paid && from(f.paidDate, f.paidAt)) for (const p of paidParts(f)) if (p.sourceId === s.id) n -= p.amount;
-  for (const x of db.settlements) if (x.via === s.id && from(localDate(x.at), x.at)) n += x.net;
+  for (const x of db.settlements) if (x.via === s.id && from(localDate(x.at), x.at)) n += transferOf(x);
   for (const x of db.reimbursements) if (x.via === s.id && from(localDate(x.at), x.at)) n += x.amount;
   return n + adj;
 }
@@ -247,7 +260,7 @@ export function cashflow(db, month) {
   const inMonth = d => d.slice(0, 7) === month;
   const r = {income: 0, incomeBy: {}, fromNhi: 0, fromCompany: 0, toNhi: 0, spend: 0, spendBy: {}, credit: 0, immediate: 0, fixedPaid: 0, fixedBy: {}, cashIn: 0, cashOut: 0, net: 0};
   for (const i of db.incomes) if (inMonth(i.date)) { r.income += i.amount; r.incomeBy[i.category] = (r.incomeBy[i.category] || 0) + i.amount; }
-  for (const s of db.settlements) if (inMonth(localDate(s.at))) { if (s.net > 0) r.fromNhi += s.net; else r.toNhi -= s.net; }
+  for (const s of db.settlements) if (inMonth(localDate(s.at))) { const t = transferOf(s); if (t > 0) r.fromNhi += t; else r.toNhi -= t; }
   for (const x of db.reimbursements) if (!x.closeOut && inMonth(localDate(x.at))) r.fromCompany += x.amount;
   for (const e of db.expenses) {
     if (e.kind === 'opening' || e.fixedId || e.payer !== 'a' || !inMonth(e.date)) continue; // khoản chia đôi từ cố định đã tính ở fixedPaid
@@ -300,6 +313,7 @@ export function validateDB(d) {
     if (!str(s.id) || !str(s.at) || !str(s.label, 200) || !Array.isArray(s.entryIds) || !s.entryIds.length) fail();
     const rows = d.expenses.filter(e => s.entryIds.includes(e.id));
     if (rows.length !== s.entryIds.length || rows.some(e => e.settlementId !== s.id) || totals(rows).net !== s.net) fail();
+    if (!(s.paid == null || (Number.isSafeInteger(s.paid) && Math.abs(s.paid) <= MAX)) || !(s.carryId == null || d.expenses.some(e => e.id === s.carryId && e.kind === 'opening'))) fail();
   }
   for (const r of d.reimbursements) {
     if (!str(r.id) || !str(r.at) || !Array.isArray(r.entryIds) || !r.entryIds.length) fail();

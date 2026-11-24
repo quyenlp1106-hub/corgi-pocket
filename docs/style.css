@@ -294,3 +294,15 @@ details.panel>summary h2{margin:0}
 .ledger-total b{font-size:16px}
 .ledger-month{display:flex;justify-content:space-between;font-size:12.5px;font-weight:700;color:var(--muted);padding:12px 2px 4px;border-bottom:1px solid var(--border)}
 .ledger-more{width:100%;margin-top:10px}
+
+/* v11: đã cấn trừ */
+details.settled{border-bottom:1px solid var(--border)}
+details.settled:last-of-type{border-bottom:0}
+details.settled summary{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;list-style:none;cursor:pointer}
+details.settled summary::-webkit-details-marker{display:none}
+details.settled summary small{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+details.settled .chev{color:var(--muted);transition:transform .2s}
+details.settled[open] .chev{transform:rotate(90deg)}
+.settled-body{background:var(--panel2);border-radius:12px;padding:4px 12px 12px;margin-bottom:10px}
+.settled-body .money-row.total{font-weight:700;border-top:1px solid var(--border)}
+.settled-body .btn{margin-top:6px}

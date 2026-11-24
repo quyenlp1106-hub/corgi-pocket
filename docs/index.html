@@ -122,6 +122,16 @@
   <div class="sheet-foot"><button class="btn ghost" value="cancel">Quay lại</button><button class="btn primary" value="ok" id="confirmOK">Xác nhận</button></div>
 </form></dialog>
 
+<dialog id="settleDialog" class="sheet"><form id="settleForm" method="dialog">
+  <div class="sheet-head"><h2>Thanh toán · cấn trừ nợ</h2><button class="icon-btn" value="cancel" aria-label="Đóng">×</button></div>
+  <p id="settleText" class="confirm-text"></p>
+  <div class="field-label">Hình thức</div><div class="chips-select" id="settleDirChips" role="radiogroup"></div><input type="hidden" name="dir" value="in">
+  <label>Số tiền chuyển<input name="amount" inputmode="decimal" autocomplete="off" placeholder="Ví dụ 350k"></label>
+  <div id="settleViaBox"><div class="field-label" id="settleViaLabel">Nguồn tiền</div><div class="chips-select" id="settleViaChips" role="radiogroup"></div><input type="hidden" name="via" value=""></div>
+  <p class="hint" id="settleNote"></p>
+  <div class="sheet-foot"><button class="btn ghost" value="cancel">Quay lại</button><button class="btn primary" value="ok">✓ Cấn trừ</button></div>
+</form></dialog>
+
 <dialog id="textDialog" class="sheet">
   <div class="sheet-head"><h2>Nội dung để gửi</h2><button type="button" data-close="textDialog" class="icon-btn" aria-label="Đóng">×</button></div>
   <textarea id="shareText" rows="14" readonly aria-label="Nội dung"></textarea>
