@@ -71,8 +71,9 @@ export const outstanding = entries => entries.filter(e => e.split !== 'company' 
 export const companyPending = entries => entries.filter(e => e.split === 'company' && !e.reimburseId);
 
 // Chốt tiền với Nhi
-// pay (tuỳ chọn) = {paid, via, carryId}: paid là tiền chuyển thật, dương = Nhi chuyển chị, âm = chị chuyển Nhi.
-// Nếu paid khác số nợ, phần còn lại thành 1 khoản "Còn lại sau cấn trừ" chờ kỳ sau.
+// pay (tuỳ chọn) = {paid, via, note}: paid là tiền chuyển thật, dương = Nhi chuyển chị (khoản thu), âm = chị chuyển Nhi (khoản chi).
+// Cấn trừ luôn đưa nợ về 0: phần chênh giữa số nợ và tiền chuyển coi như đã bù trừ, không phát sinh thu chi.
+// (carryId chỉ còn ở dữ liệu cũ bản v11 đầu, vẫn đọc và hoàn tác được.)
 export const transferOf = s => s.paid ?? s.net;
 export function closePeriod(db, ids, id, at, label, pay = null) {
   const chosen = db.expenses.filter(e => ids.includes(e.id));
@@ -82,11 +83,8 @@ export function closePeriod(db, ids, id, at, label, pay = null) {
   if (pay) {
     if (!Number.isSafeInteger(pay.paid) || Math.abs(pay.paid) > MAX) throw Error('Số tiền chuyển không hợp lệ');
     row.paid = pay.paid; row.via = pay.paid ? pay.via || null : null;
-    const rest = net - pay.paid;
-    if (rest) {
-      row.carryId = pay.carryId;
-      expenses.push({id: pay.carryId, kind: 'opening', description: 'Còn lại sau cấn trừ ' + label, date: localDate(at), balance: rest, settlementId: null, createdAt: at});
-    }
+    const note = String(pay.note || '').trim().slice(0, 120);
+    if (note) row.note = note;
   }
   return {...db, expenses, settlements: [row, ...db.settlements]};
 }
@@ -313,7 +311,7 @@ export function validateDB(d) {
     if (!str(s.id) || !str(s.at) || !str(s.label, 200) || !Array.isArray(s.entryIds) || !s.entryIds.length) fail();
     const rows = d.expenses.filter(e => s.entryIds.includes(e.id));
     if (rows.length !== s.entryIds.length || rows.some(e => e.settlementId !== s.id) || totals(rows).net !== s.net) fail();
-    if (!(s.paid == null || (Number.isSafeInteger(s.paid) && Math.abs(s.paid) <= MAX)) || !(s.carryId == null || d.expenses.some(e => e.id === s.carryId && e.kind === 'opening'))) fail();
+    if (!(s.note == null || typeof s.note === 'string') || !(s.paid == null || (Number.isSafeInteger(s.paid) && Math.abs(s.paid) <= MAX)) || !(s.carryId == null || d.expenses.some(e => e.id === s.carryId && e.kind === 'opening'))) fail();
   }
   for (const r of d.reimbursements) {
     if (!str(r.id) || !str(r.at) || !Array.isArray(r.entryIds) || !r.entryIds.length) fail();

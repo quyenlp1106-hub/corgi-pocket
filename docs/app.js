@@ -176,14 +176,14 @@ function donut(categories) {
 }
 function transferText(x) {
   const t = transferOf(x);
-  return t > 0 ? `${N().b} chuyển ${N().a} ${fmt(t)}` : t < 0 ? `${N().a} chuyển ${N().b} ${fmt(-t)}` : 'Chỉ cấn trừ, không chuyển tiền';
+  return (t ? (x.note || (t > 0 ? `${N().b} chuyển ${N().a}` : `${N().a} chuyển ${N().b}`)) + ` ${t > 0 ? '+' : '−'}${fmt(Math.abs(t))}` : 'Cấn trừ hết, không chuyển tiền');
 }
 function settledHTML(x) {
   const rows = db.expenses.filter(e => x.entryIds.includes(e.id) && withNhi(e)).sort((a, b) => b.date.localeCompare(a.date)), t = transferOf(x), rest = x.net - t;
   return `<details class="settled"><summary><div><strong>${new Date(x.at).toLocaleDateString('vi-VN')} · ${esc(transferText(x))}</strong><small>${esc(x.label)} · ${x.entryIds.length} khoản · số nợ ${esc(owedText(x.net))}${t && x.via ? ' · ' + (t > 0 ? 'vào ' : 'từ ') + esc(sourceName(x.via)) : ''}</small></div><span class="chev">›</span></summary>
     <div class="settled-body">${rows.map(e => `<div class="money-row"><span>${shortDate(e.date)} · ${esc(e.description)}<small>${esc(splitLabel(e))}${e.payer ? ' · ' + esc(N()[e.payer]) + ' trả' : ''}</small></span><b class="${debt(e) < 0 ? 'orange' : ''}">${debt(e) > 0 ? '+' : ''}${fmt(debt(e))}</b></div>`).join('')}
     <div class="money-row total"><span>Số nợ cấn trừ</span><b>${esc(owedText(x.net))}</b></div>
-    ${rest ? `<p class="hint">Còn lại ${esc(owedText(rest))} đã chuyển sang kỳ sau.</p>` : ''}
+    ${x.carryId ? `<p class="hint">Còn lại ${esc(owedText(rest))} đã chuyển sang kỳ sau.</p>` : rest ? `<p class="hint">Phần chênh ${fmt(Math.abs(rest))} đã cấn trừ, không tính thu chi.</p>` : ''}
     <button class="btn ghost small" data-undo="${x.id}">↶ Hoàn tác lần cấn trừ này</button></div></details>`;
 }
 function renderNhi() {
@@ -274,7 +274,7 @@ function flowSpan() {
 function moveHTML(m) {
   const x = m.x;
   return `<article class="expense ${m.out ? '' : 'is-income'}"><span class="cat-icon">⇄</span>
-    <div class="expense-body"><div class="expense-name"><span class="expense-date">${shortDate(m.date)}</span> · ${m.out ? `${esc(N().a)} chuyển ${esc(N().b)}` : `${esc(N().b)} chuyển ${esc(N().a)}`}</div><div class="expense-meta">Cấn trừ ${esc(x.label)} · ${m.out ? 'từ' : 'vào'} ${esc(sourceName(x.via))}</div>
+    <div class="expense-body"><div class="expense-name"><span class="expense-date">${shortDate(m.date)}</span> · ${esc(x.note || (m.out ? `${N().a} chuyển ${N().b}` : `${N().b} chuyển ${N().a}`))}</div><div class="expense-meta">Cấn trừ ${esc(x.label)} · ${m.out ? 'từ' : 'vào'} ${esc(sourceName(x.via))}</div>
     <div class="expense-tags"><span class="tag green">✓ Đã cấn trừ</span></div></div>
     <div class="expense-side"><span class="expense-amount ${m.out ? '' : 'green'}">${m.out ? '' : '+'}${fmt(m.amount)}</span><div><button class="text-btn" data-page="nhi">Xem</button></div></div></article>`;
 }
@@ -347,29 +347,34 @@ function render() {
 }
 function go(p) { page = p; history.replaceState(null, '', '#' + p); render(); window.scrollTo({top: 0}); }
 // Hộp cấn trừ với Nhi: chọn chiều chuyển, số tiền, nguồn tiền
-let settleNet = 0;
+let settleNet = 0, settleCount = 0;
 function openSettle(net, count) {
-  settleNet = net; const d = $('#settleDialog'), f = $('#settleForm').elements; d.returnValue = '';
+  settleNet = net; settleCount = count; const d = $('#settleDialog'), f = $('#settleForm').elements; d.returnValue = '';
   $('#settleText').textContent = `${nhiLabel()} · ${count} khoản chờ chốt.\nSố nợ: ${owedText(net)}.`;
-  f.dir.value = net < 0 ? 'out' : 'in'; f.amount.value = net ? formatMoney(Math.abs(net)).replace(/\s*đ$/, '') : '0'; f.via.value = lastVia();
+  f.dir.value = net < 0 ? 'out' : 'in'; f.amount.value = net ? formatMoney(Math.abs(net)).replace(/\s*đ$/, '') : '0'; f.via.value = lastVia(); f.note.value = settleNoteDefault(f.dir.value); f.note.dataset.auto = '1';
   drawSettle(); d.showModal();
   return new Promise(resolve => d.addEventListener('close', () => {
     if (d.returnValue !== 'ok') return resolve(null);
     const amt = moneyInput(f.amount.value || '0');
     if (!Number.isFinite(amt) || amt < 0) { toast('Số tiền chưa đúng.'); return resolve(null); }
-    resolve({paid: f.dir.value === 'in' ? amt : -amt, via: amt ? f.via.value || null : null});
+    resolve({paid: f.dir.value === 'in' ? amt : -amt, via: amt ? f.via.value || null : null, note: amt ? f.note.value.trim() || settleNoteDefault(f.dir.value) : ''});
   }, {once: true}));
 }
-function drawSettle() {
-  const f = $('#settleForm').elements, dir = f.dir.value, amt = moneyInput(f.amount.value || '0'), ok = Number.isFinite(amt) && amt >= 0;
+const settleNoteDefault = dir => dir === 'in' ? `${N().b} hoàn` : `${N().a} chuyển ${N().b}`;
+function drawSettle(ev) {
+  const f = $('#settleForm').elements, dir = f.dir.value;
+  if (ev?.target === f.note) f.note.dataset.auto = f.note.value.trim() ? '' : '1';
+  else if (f.note.dataset.auto) f.note.value = settleNoteDefault(dir);
+  const amt = moneyInput(f.amount.value || '0'), ok = Number.isFinite(amt) && amt >= 0;
   $('#settleDirChips').innerHTML = chipHTML('dir', [['in', `⬇ ${esc(N().b)} nợ · chuyển ${esc(N().a)}`], ['out', `⬆ ${esc(N().a)} nợ · chuyển ${esc(N().b)}`]], dir);
   $('#settleViaBox').hidden = !ok || !amt;
   $('#settleViaLabel').textContent = dir === 'in' ? `${N().a} nhận vào` : `${N().a} trả bằng`;
   $('#settleViaChips').innerHTML = chipHTML('via', db.sources.filter(x => !isCredit(x.kind)).map(x => [x.id, sourceLabel(x)]), f.via.value);
   if (!ok) { $('#settleNote').textContent = 'Nhập số tiền, ví dụ 350k hoặc 1,2tr.'; return; }
   const paid = dir === 'in' ? amt : -amt, rest = settleNet - paid;
+  $('#settleNoteBox').hidden = !amt;
   $('#settleNote').innerHTML = (amt ? (dir === 'in' ? `💚 +${fmt(amt)} tính vào <b>khoản thu</b> của ${esc(N().a)}.` : `❤️ −${fmt(amt)} tính vào <b>khoản chi</b> của ${esc(N().a)}.`) : 'Chỉ cấn trừ, không chuyển tiền.')
-    + (rest ? `<br>⚠️ Còn lại: ${esc(owedText(rest))}, chuyển sang kỳ sau.` : '<br>✓ Số dư về 0, các khoản gộp vào mục Đã cấn trừ.');
+    + `<br>✓ Nợ về 0, ${settleCount} khoản gộp vào mục Đã cấn trừ.` + (rest ? ` Phần chênh ${fmt(Math.abs(rest))} coi như đã bù trừ, không tính thu chi.` : '');
 }
 $('#settleForm').addEventListener('input', drawSettle);
 // pick = {label, value}: hỏi thêm nguồn tiền (trả bằng / nhận vào), trả về id nguồn thay cho true
@@ -696,7 +701,7 @@ async function action(a) {
     const rows = outstanding(nhiRows()); if (!rows.length) return;
     const pay = await openSettle(totals(rows).net, rows.length); if (!pay) return;
     try {
-      const next = closePeriod(db, rows.map(e => e.id), uid(), new Date().toISOString(), nhiLabel(), {...pay, carryId: uid()});
+      const next = closePeriod(db, rows.map(e => e.id), uid(), new Date().toISOString(), nhiLabel(), pay);
       if (commit(next)) { render(); toast(pay.paid > 0 ? 'Đã cấn trừ · ghi vào khoản thu 🐶' : pay.paid < 0 ? 'Đã cấn trừ · ghi vào khoản chi 🐶' : 'Đã cấn trừ 🐶'); }
     } catch (e) { toast(e.message); }
     return;
